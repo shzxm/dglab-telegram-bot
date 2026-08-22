@@ -1,0 +1,11 @@
+{
+  "telegramToken": "REPLACE_WITH_BOTFATHER_TOKEN",
+  "ownerUserId": 0,
+  "allowedChatId": 0,
+  "deviceMode": "mock",
+  "strengthLimit": 133,
+  "sessionDurationSeconds": 9999,
+  "voteWindowSeconds": 5,
+  "actionWindowMs": 1000,
+  "actionsPerWindow": 3
+}

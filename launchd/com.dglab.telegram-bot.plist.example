@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dglab.telegram-bot</string>
+  <key>WorkingDirectory</key>
+  <string>/ABSOLUTE/PATH/TO/dglab-telegram-bot</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/ABSOLUTE/PATH/TO/dglab-telegram-bot/node_modules/.bin/tsx</string>
+    <string>/ABSOLUTE/PATH/TO/dglab-telegram-bot/src/index.ts</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TG_OWNER_USER_ID</key>
+    <string>OWNER_USER_ID_HERE</string>
+    <key>TG_ALLOWED_CHAT_ID</key>
+    <string>ALLOWED_CHAT_ID_HERE</string>
+    <key>DG_DEVICE_MODE</key>
+    <string>mock</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/dglab-telegram-bot.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/dglab-telegram-bot.err.log</string>
+</dict>
+</plist>
