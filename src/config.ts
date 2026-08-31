@@ -13,6 +13,8 @@ export interface AppConfig {
   voteWindowMs: number;
   actionWindowMs: number;
   actionsPerWindow: number;
+  obsHost: string;
+  obsPort: number;
 }
 
 interface FileConfig {
@@ -25,6 +27,8 @@ interface FileConfig {
   voteWindowSeconds?: number;
   actionWindowMs?: number;
   actionsPerWindow?: number;
+  obsHost?: string;
+  obsPort?: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -40,7 +44,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   const voteWindowMs = parseBoundedInteger(env.DG_VOTE_WINDOW_SECONDS ?? value(file.voteWindowSeconds) ?? "5", "DG_VOTE_WINDOW_SECONDS", 1, 60) * 1000;
   const actionWindowMs = parseBoundedInteger(env.DG_ACTION_WINDOW_MS ?? value(file.actionWindowMs) ?? "1000", "DG_ACTION_WINDOW_MS", 100, 60_000);
   const actionsPerWindow = parseBoundedInteger(env.DG_ACTIONS_PER_WINDOW ?? value(file.actionsPerWindow) ?? "3", "DG_ACTIONS_PER_WINDOW", 1, 100);
-  return { token, ownerUserId, allowedChatId, deviceMode, strengthLimit, sessionDurationMs, voteWindowMs, actionWindowMs, actionsPerWindow };
+  const obsHost = (env.DG_OBS_HOST ?? file.obsHost ?? "127.0.0.1").trim();
+  const obsPort = parseBoundedInteger(env.DG_OBS_PORT ?? value(file.obsPort) ?? "8787", "DG_OBS_PORT", 1, 65535);
+  return { token, ownerUserId, allowedChatId, deviceMode, strengthLimit, sessionDurationMs, voteWindowMs, actionWindowMs, actionsPerWindow, obsHost, obsPort };
 }
 
 function readFileConfig(path: string | undefined): FileConfig {

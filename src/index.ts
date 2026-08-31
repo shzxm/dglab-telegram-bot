@@ -4,16 +4,32 @@ import { CoyoteV2Device } from "./coyote-v2.js";
 import { ControlSession, type Action, type Mode } from "./control.js";
 import { callbackData, parseCallbackData } from "./bot-security.js";
 import { loadConfig } from "./config.js";
+import { createInviteCode, inviteCodeMatches, normalizeInviteCode } from "./session-access.js";
+import { startObsOverlay } from "./obs-overlay.js";
 
 const config = loadConfig(process.env);
-const { token, ownerUserId, allowedChatId, strengthLimit, sessionDurationMs, voteWindowMs, actionWindowMs, actionsPerWindow } = config;
-
+const { token, ownerUserId, allowedChatId, strengthLimit, sessionDurationMs, voteWindowMs, actionWindowMs, actionsPerWindow, obsHost, obsPort } = config;
 const bot = new Telegraf(token);
 const device = config.deviceMode === "ble" ? new CoyoteV2Device() : new MockDevice();
+
 let session: ControlSession | null = null;
+let inviteCode = "";
+let boundGroupId: number | null = null;
+const inviteAuthorizedUsers = new Set<number>();
+let sharedPanel: { chatId: number; messageId: number } | null = null;
+let sharedPanelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let autoRampTimer: ReturnType<typeof setInterval> | null = null;
 let autoRampStopTimer: ReturnType<typeof setTimeout> | null = null;
 let autoRampRateSeconds = 3;
+
+type ActionPoolPreset = "all" | "gentle" | "strength" | "waveform";
+const ACTION_POOL_ORDER: ActionPoolPreset[] = ["all", "gentle", "strength", "waveform"];
+let actionPoolPreset: ActionPoolPreset = "all";
+
+interface OperatorEntry { userId: number; displayName: string }
+let temporaryOperator: (OperatorEntry & { expiresAt: number }) | null = null;
+const operatorQueue: OperatorEntry[] = [];
+let operatorTimer: ReturnType<typeof setTimeout> | null = null;
 
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : "未知错误";
@@ -24,7 +40,6 @@ function errorText(error: unknown): string {
     [/session is not active/i, "会话尚未启动，请等待管理员授权开始"],
     [/会话尚未启动$/, "会话尚未启动，请等待管理员授权开始"],
     [/user has not joined the session/i, "你还没有加入会话"],
-    [/user action is rate limited/i, "操作太频繁，每位用户每秒最多操作 3 次，请稍后再试"],
     [/session cannot be armed/i, "会话无法启动"],
     [/invalid session duration/i, "会话时长无效"],
     [/invalid session limits/i, "会话强度上限无效"],
@@ -36,11 +51,93 @@ function stateText(state: string): string {
   return ({ draft: "草稿", active: "进行中", stopped: "已停止", fault: "故障" } as Record<string, string>)[state] ?? state;
 }
 
+function modeText(mode: Mode): string {
+  return ({ collaboration: "管理员", voting: "投票", event: "活动/直播" } as Record<Mode, string>)[mode];
+}
+
+function waveformName(id: string): string {
+  return ({ imported_0: "波浪", imported_1: "持续跳跃", imported_2: "渐强持续", imported_3: "最爱", imported_4: "按揉", imported_5: "跳强" } as Record<string, string>)[id] ?? id;
+}
+
 function voteText(vote: { channel: "A" | "B"; action: Action; count: number }): string {
   const action = vote.action.type === "strength_delta"
     ? `${vote.channel} ${vote.action.delta > 0 ? "+" : ""}${vote.action.delta}`
-    : vote.action.type === "waveform" ? `${vote.channel} ${vote.action.waveformId}` : "停止";
+    : vote.action.type === "waveform" ? `${vote.channel} ${waveformName(vote.action.waveformId)}` : "停止";
   return `${action}=${vote.count}票`;
+}
+
+function displayName(from: { username?: string; first_name: string }): string {
+  return from.username ? `@${from.username}` : from.first_name;
+}
+
+function commandArgument(text: string): string { return text.trim().split(/\s+/).slice(1).join(" "); }
+function isOwner(userId: number): boolean { return userId === ownerUserId; }
+function isGroupType(chatType: string | undefined): boolean { return chatType === "group" || chatType === "supergroup"; }
+function inAllowedChat(chatId: number, chatType: string | undefined): boolean {
+  return chatType === "private" || chatId === allowedChatId || chatId === boundGroupId;
+}
+
+function poolText(): string {
+  return ({ all: "全部动作", gentle: "温和动作", strength: "仅强度", waveform: "仅波形" } as Record<ActionPoolPreset, string>)[actionPoolPreset];
+}
+
+function isActionAllowed(action: Action): boolean {
+  if (action.type === "stop" || actionPoolPreset === "all") return true;
+  if (actionPoolPreset === "strength") return action.type === "strength_delta";
+  if (actionPoolPreset === "waveform") return action.type === "waveform";
+  if (action.type === "strength_delta") return Math.abs(action.delta) <= 3;
+  return action.waveformId === "imported_0" || action.waveformId === "imported_4";
+}
+
+function clearOperatorState(): void {
+  if (operatorTimer) clearTimeout(operatorTimer);
+  operatorTimer = null;
+  temporaryOperator = null;
+  operatorQueue.splice(0);
+}
+
+function grantTemporaryOperator(entry: OperatorEntry): void {
+  if (operatorTimer) clearTimeout(operatorTimer);
+  temporaryOperator = { ...entry, expiresAt: Date.now() + 10_000 };
+  operatorTimer = setTimeout(() => {
+    temporaryOperator = null;
+    operatorTimer = null;
+    const next = operatorQueue.shift();
+    if (next) grantTemporaryOperator(next);
+    scheduleSharedPanelRefresh();
+  }, 10_000);
+  operatorTimer.unref?.();
+  scheduleSharedPanelRefresh();
+}
+
+function enqueueTemporaryOperator(entry: OperatorEntry): number {
+  if (temporaryOperator?.userId === entry.userId) return 0;
+  const existing = operatorQueue.findIndex((candidate) => candidate.userId === entry.userId);
+  if (existing >= 0) return existing + 1;
+  operatorQueue.push(entry);
+  if (!temporaryOperator) {
+    const next = operatorQueue.shift();
+    if (next) grantTemporaryOperator(next);
+    return 0;
+  }
+  scheduleSharedPanelRefresh();
+  return operatorQueue.length;
+}
+
+function removeFromOperatorQueue(userId: number): void {
+  const index = operatorQueue.findIndex((entry) => entry.userId === userId);
+  if (index >= 0) operatorQueue.splice(index, 1);
+  scheduleSharedPanelRefresh();
+}
+
+function drawRandomOperator(): OperatorEntry {
+  if (!session) throw new Error("当前没有会话");
+  const candidates = session.participantEntries().filter((entry) => entry.userId !== ownerUserId);
+  if (!candidates.length) throw new Error("当前没有可抽取的参与者");
+  const selected = candidates[Math.floor(Math.random() * candidates.length)];
+  if (!selected) throw new Error("抽取临时操作员失败");
+  grantTemporaryOperator(selected);
+  return selected;
 }
 
 function stopAutoRamp(): void {
@@ -61,221 +158,373 @@ function startAutoRamp(): void {
       .catch(() => stopAutoRamp());
   }, autoRampRateSeconds * 1000);
   autoRampStopTimer = setTimeout(stopAutoRamp, 30_000);
+  autoRampTimer.unref?.();
+  autoRampStopTimer.unref?.();
 }
+
+function resetSessionRuntime(): void {
+  inviteCode = createInviteCode();
+  boundGroupId = null;
+  inviteAuthorizedUsers.clear();
+  inviteAuthorizedUsers.add(ownerUserId);
+  sharedPanel = null;
+  actionPoolPreset = "all";
+  stopAutoRamp();
+  clearOperatorState();
+}
+
+function createSession(mode: Mode, chatId: number): ControlSession {
+  resetSessionRuntime();
+  session = new ControlSession({ id: crypto.randomUUID(), chatId, ownerUserId, mode, limitA: strengthLimit, limitB: strengthLimit, durationMs: sessionDurationMs, startedAt: 0, expiresAt: 0 }, device, strengthLimit, 2, actionWindowMs, voteWindowMs, Date.now, actionsPerWindow);
+  return session;
+}
+
+// The owner controls when a bound group becomes interactive. Before an
+// active session exists, non-owner group traffic is intentionally ignored.
+bot.use(async (ctx, next) => {
+  if (isGroupType(ctx.chat?.type) && !isOwner(ctx.from?.id ?? 0)
+    && (ctx.chat?.id === boundGroupId || boundGroupId === null)
+    && session?.snapshot().state !== "active") return;
+  await next();
+});
 
 async function initializeDefaultLevels(): Promise<void> {
-  if (session && !session.isParticipant(ownerUserId)) session.addParticipant(ownerUserId, "管理员");
-  await device.setStrength("A", 1);
-  await device.setStrength("B", 1);
+  if (!session) return;
+  if (!session.isParticipant(ownerUserId)) session.addParticipant(ownerUserId, "管理员");
+  await session.applyOwnerAction({ type: "strength_delta", channel: "A", delta: 1 });
+  await session.applyOwnerAction({ type: "strength_delta", channel: "B", delta: 1 });
+  await session.applyOwnerAction({ type: "waveform", channel: "A", waveformId: "imported_0", durationMs: 9999 });
+  await session.applyOwnerAction({ type: "waveform", channel: "B", waveformId: "imported_0", durationMs: 9999 });
 }
 
-function inAllowedChat(chatId: number): boolean { return chatId === allowedChatId; }
-function isOwner(userId: number): boolean { return userId === ownerUserId; }
 function panel(sessionId: string) {
   const cb = (code: string) => callbackData(sessionId, code);
-  return Markup.inlineKeyboard([
-    [Markup.button.callback("A波浪", cb("wa0")), Markup.button.callback("A持续跳跃", cb("wa1")), Markup.button.callback("A渐强持续", cb("wa2"))],
-    [Markup.button.callback("A最爱", cb("wa3")), Markup.button.callback("A按揉", cb("wa4")), Markup.button.callback("A跳强", cb("wa5"))],
-    [Markup.button.callback("A +1", cb("a_p1")), Markup.button.callback("A +3", cb("a_p3")), Markup.button.callback("A +5", cb("a_p5"))],
-    [Markup.button.callback("A -1", cb("a_m1")), Markup.button.callback("A -3", cb("a_m3")), Markup.button.callback("A -5", cb("a_m5"))],
-    [Markup.button.callback("B波浪", cb("wb0")), Markup.button.callback("B持续跳跃", cb("wb1")), Markup.button.callback("B渐强持续", cb("wb2"))],
-    [Markup.button.callback("B最爱", cb("wb3")), Markup.button.callback("B按揉", cb("wb4")), Markup.button.callback("B跳强", cb("wb5"))],
-    [Markup.button.callback("B +1", cb("b_p1")), Markup.button.callback("B +3", cb("b_p3")), Markup.button.callback("B +5", cb("b_p5"))],
-    [Markup.button.callback("B -1", cb("b_m1")), Markup.button.callback("B -3", cb("b_m3")), Markup.button.callback("B -5", cb("b_m5"))],
-    [Markup.button.callback("加入会话", cb("join")), Markup.button.callback("退出会话", cb("leave"))],
-    [Markup.button.callback("立即停止（管理员）", cb("stop"))],
-    [Markup.button.callback(`自动提升30秒：${autoRampTimer ? "已开启" : "未开启"}`, cb("auto_ramp_toggle"))],
-    [Markup.button.callback(`提升速率：每${autoRampRateSeconds}秒`, cb("auto_ramp_rate"))],
-  ]);
+  const rows: Array<Array<ReturnType<typeof Markup.button.callback>>> = [];
+  if (actionPoolPreset !== "strength") {
+    if (actionPoolPreset === "gentle") rows.push([Markup.button.callback("A波浪", cb("wa0")), Markup.button.callback("A按揉", cb("wa4"))]);
+    else {
+      rows.push([Markup.button.callback("A波浪", cb("wa0")), Markup.button.callback("A持续跳跃", cb("wa1")), Markup.button.callback("A渐强持续", cb("wa2"))]);
+      rows.push([Markup.button.callback("A最爱", cb("wa3")), Markup.button.callback("A按揉", cb("wa4")), Markup.button.callback("A跳强", cb("wa5"))]);
+    }
+  }
+  if (actionPoolPreset !== "waveform") {
+    rows.push([Markup.button.callback("A +1", cb("a_p1")), Markup.button.callback("A +3", cb("a_p3")), ...(actionPoolPreset === "gentle" ? [] : [Markup.button.callback("A +5", cb("a_p5"))])]);
+    rows.push([Markup.button.callback("A -1", cb("a_m1")), Markup.button.callback("A -3", cb("a_m3")), ...(actionPoolPreset === "gentle" ? [] : [Markup.button.callback("A -5", cb("a_m5"))])]);
+  }
+  if (actionPoolPreset !== "strength") {
+    if (actionPoolPreset === "gentle") rows.push([Markup.button.callback("B波浪", cb("wb0")), Markup.button.callback("B按揉", cb("wb4"))]);
+    else {
+      rows.push([Markup.button.callback("B波浪", cb("wb0")), Markup.button.callback("B持续跳跃", cb("wb1")), Markup.button.callback("B渐强持续", cb("wb2"))]);
+      rows.push([Markup.button.callback("B最爱", cb("wb3")), Markup.button.callback("B按揉", cb("wb4")), Markup.button.callback("B跳强", cb("wb5"))]);
+    }
+  }
+  if (actionPoolPreset !== "waveform") {
+    rows.push([Markup.button.callback("B +1", cb("b_p1")), Markup.button.callback("B +3", cb("b_p3")), ...(actionPoolPreset === "gentle" ? [] : [Markup.button.callback("B +5", cb("b_p5"))])]);
+    rows.push([Markup.button.callback("B -1", cb("b_m1")), Markup.button.callback("B -3", cb("b_m3")), ...(actionPoolPreset === "gentle" ? [] : [Markup.button.callback("B -5", cb("b_m5"))])]);
+  }
+  rows.push([Markup.button.callback("加入会话", cb("join")), Markup.button.callback("退出会话", cb("leave"))]);
+  if (session?.snapshot().mode === "event") {
+    rows.push([Markup.button.callback("加入10秒操作队列", cb("queue_join")), Markup.button.callback("退出队列", cb("queue_leave"))]);
+    rows.push([Markup.button.callback("随机抽取操作员（管理员）", cb("operator_draw")), Markup.button.callback(`动作池：${poolText()}`, cb("pool_cycle"))]);
+  }
+  rows.push([Markup.button.callback("立即停止（管理员）", cb("stop"))]);
+  rows.push([Markup.button.callback(`自动提升30秒：${autoRampTimer ? "已开启" : "未开启"}`, cb("auto_ramp_toggle"))]);
+  rows.push([Markup.button.callback(`提升速率：每${autoRampRateSeconds}秒`, cb("auto_ramp_rate"))]);
+  return Markup.inlineKeyboard(rows);
 }
 
 function adminMenu() {
   return Markup.inlineKeyboard([
     [Markup.button.callback("连接设备", "menu_connect"), Markup.button.callback("设备状态", "menu_status")],
     [Markup.button.callback("授权并启动管理员会话", "menu_new_collab"), Markup.button.callback("授权并启动投票会话", "menu_new_vote")],
+    [Markup.button.callback("授权并启动活动/直播会话", "menu_new_event")],
     [Markup.button.callback("授权并启动会话", "menu_arm"), Markup.button.callback("撤销并归零", "menu_disarm")],
-    [Markup.button.callback("断开设备", "menu_disconnect")],
+    [Markup.button.callback("查看多人邀请码", "menu_invite"), Markup.button.callback("断开设备", "menu_disconnect")],
   ]);
 }
-
-bot.start(async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id)) return;
-  if (!isOwner(ctx.from.id)) {
-    if (session && session.snapshot().state === "active") {
-      await ctx.reply(await panelText(), panel(session.config.id));
-    } else {
-      await ctx.reply("当前没有进行中的会话，请等待管理员发起会话。");
-    }
-    return;
-  }
-  await ctx.reply(`已识别为管理员，请使用下方按钮操作。\n强度上限为 ${strengthLimit}，每次可调整 ±1、±3 或 ±5。`, adminMenu());
-});
-
-bot.command("help", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id)) return;
-  await ctx.reply(`请使用按钮操作。强度上限为 ${strengthLimit}，每次只能调整 ±1、±3 或 ±5。私信模式下不接受其他聊天的操作。`, adminMenu());
-});
 
 async function panelText(): Promise<string> {
   const deviceStatus = await device.getStatus();
   if (!session) return "DG-LAB：当前没有会话";
   const status = session.snapshot();
   const remaining = status.expiresAt > 0 ? `${Math.max(0, Math.ceil((status.expiresAt - Date.now()) / 1000))}秒` : "不限";
+  const roundRemaining = status.voteRoundEndsAt > 0 ? Math.max(0, Math.ceil((status.voteRoundEndsAt - Date.now()) / 1000)) : 0;
+  const operatorRemaining = temporaryOperator ? Math.max(0, Math.ceil((temporaryOperator.expiresAt - Date.now()) / 1000)) : 0;
   return [
     "DG-LAB 控制面板",
     `管理员：${status.state === "active" ? "已授权" : "未授权"}`,
     `设备：${deviceStatus.connected ? "已连接" : "未连接"}`,
     `设备电量：${deviceStatus.battery}%`,
-    `状态：${stateText(status.state)}  模式：${status.mode === "voting" ? "投票" : "管理员"}`,
+    `状态：${stateText(status.state)}  模式：${modeText(status.mode)}`,
     `A：${status.currentA}/${status.limitA}  B：${status.currentB}/${status.limitB}`,
     `当前波形：A ${status.waveformA} / B ${status.waveformB}`,
-    ...(status.mode === "voting" ? [] : ["管理员模式：操作立即生效"]),
+    ...(status.mode === "collaboration" ? ["管理员模式：操作立即生效"] : [
+      `当前票数：${status.voteCounts.length ? status.voteCounts.map(voteText).join("，") : "暂无"}`,
+      `本轮剩余：${roundRemaining}秒`,
+      "规则：每人每轮可分别投 A/B 强度和 A/B 波形各一次",
+    ]),
+    ...(status.mode === "event" ? [
+      `动作池：${poolText()}`,
+      `临时操作员：${temporaryOperator ? `${temporaryOperator.displayName}（剩余${operatorRemaining}秒）` : "无"}`,
+      `操作队列：${operatorQueue.length}人`,
+    ] : []),
     `操作人数：${status.operators.length}`,
     `操作人员：${status.operators.join("、") || "无"}`,
-    ...(status.mode === "voting" ? [`当前票数：${status.voteCounts.length ? status.voteCounts.map(voteText).join("，") : "暂无"}`, "规则：每人每轮可分别投 A/B 强度和 A/B 波形各一次"] : []),
     `参与者：${status.participants}  剩余：${remaining}`,
+    ...(boundGroupId ? [`绑定群聊：${boundGroupId}`] : []),
   ].join("\n");
 }
 
-bot.command("connect", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id) || !isOwner(ctx.from.id)) return;
-  try {
-    await device.connect();
-    await device.emergencyStop();
-    await ctx.reply("设备已连接，A/B 已归零。现在可以 /newsession。");
-  } catch (error) {
-    await ctx.reply(`连接失败：${errorText(error)}`);
+async function inviteText(): Promise<string> {
+  const me = bot.botInfo ?? await bot.telegram.getMe();
+  return [
+    `多人邀请码：${inviteCode}`,
+    "该邀请码在当前会话结束前可由多人重复使用。",
+    `私聊加入链接：https://t.me/${me.username}?start=${inviteCode}`,
+    `群聊绑定：把 Bot 加入群后，由管理员在群内发送 /bindgroup ${inviteCode}`,
+  ].join("\n");
+}
+
+async function assertBoundGroupMember(userId: number): Promise<void> {
+  if (!boundGroupId || userId === ownerUserId) return;
+  let member;
+  try { member = await bot.telegram.getChatMember(boundGroupId, userId); }
+  catch { throw new Error("无法校验群成员身份，请确认 Bot 已加入绑定群并具有管理员权限"); }
+  if (member.status === "left" || member.status === "kicked") throw new Error("只有当前绑定群的成员可以参加活动");
+}
+
+function canJoinFromContext(userId: number, chatId: number, suppliedCode?: string): boolean {
+  return isOwner(userId) || chatId === boundGroupId || inviteAuthorizedUsers.has(userId) || inviteCodeMatches(inviteCode, suppliedCode);
+}
+
+async function joinCurrentSession(userId: number, name: string, chatId: number, suppliedCode?: string): Promise<void> {
+  if (!session || session.snapshot().state !== "active") throw new Error("会话尚未启动，请等待管理员授权开始");
+  if (!canJoinFromContext(userId, chatId, suppliedCode)) throw new Error("邀请码无效，请使用管理员提供的多人邀请码");
+  await assertBoundGroupMember(userId);
+  inviteAuthorizedUsers.add(userId);
+  session.addParticipant(userId, name);
+  scheduleSharedPanelRefresh();
+}
+
+async function publishGroupPanel(chatId: number): Promise<void> {
+  if (!session) throw new Error("当前没有会话");
+  const message = await bot.telegram.sendMessage(chatId, await panelText(), panel(session.config.id));
+  sharedPanel = { chatId, messageId: message.message_id };
+}
+
+function scheduleSharedPanelRefresh(): void {
+  if (!sharedPanel || !session || sharedPanelRefreshTimer) return;
+  sharedPanelRefreshTimer = setTimeout(() => {
+    sharedPanelRefreshTimer = null;
+    if (!sharedPanel || !session) return;
+    void panelText()
+      .then((text) => bot.telegram.editMessageText(sharedPanel!.chatId, sharedPanel!.messageId, undefined, text, panel(session!.config.id)))
+      .catch(() => undefined)
+      .finally(() => {
+        const snapshot = session?.snapshot();
+        if ((snapshot?.voteRoundEndsAt ?? 0) > Date.now() || (temporaryOperator?.expiresAt ?? 0) > Date.now()) scheduleSharedPanelRefresh();
+      });
+  }, 750);
+  sharedPanelRefreshTimer.unref?.();
+}
+
+async function stopSession(): Promise<void> {
+  await session?.stop();
+  stopAutoRamp();
+  clearOperatorState();
+  scheduleSharedPanelRefresh();
+}
+
+const obsServer = startObsOverlay(obsHost, obsPort, () => {
+  const status = session?.snapshot();
+  return {
+    active: status?.state === "active",
+    mode: status ? modeText(status.mode) : "无",
+    participants: status?.participants ?? 0,
+    strengthA: status?.currentA ?? 0,
+    strengthB: status?.currentB ?? 0,
+    waveformA: status?.waveformA ?? "-",
+    waveformB: status?.waveformB ?? "-",
+    votes: status?.voteCounts.map(voteText) ?? [],
+    roundRemainingSeconds: status?.voteRoundEndsAt ? Math.max(0, Math.ceil((status.voteRoundEndsAt - Date.now()) / 1000)) : 0,
+    temporaryOperator: temporaryOperator?.displayName ?? "",
+    operatorRemainingSeconds: temporaryOperator ? Math.max(0, Math.ceil((temporaryOperator.expiresAt - Date.now()) / 1000)) : 0,
+    queueLength: operatorQueue.length,
+  };
+});
+obsServer.on("error", (error) => console.error("OBS overlay error", error));
+
+bot.start(async (ctx) => {
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type)) return;
+  const suppliedCode = normalizeInviteCode(ctx.startPayload || commandArgument(ctx.message.text));
+  if (!isOwner(ctx.from.id) && suppliedCode && inviteCodeMatches(inviteCode, suppliedCode)) {
+    inviteAuthorizedUsers.add(ctx.from.id);
+    if (session?.snapshot().state === "active") await joinCurrentSession(ctx.from.id, displayName(ctx.from), ctx.chat.id, suppliedCode);
   }
+  if (!isOwner(ctx.from.id)) {
+    if (session?.snapshot().state === "active" && (inviteAuthorizedUsers.has(ctx.from.id) || session.isParticipant(ctx.from.id))) await ctx.reply(await panelText(), panel(session.config.id));
+    else if (session?.snapshot().state === "active") await ctx.reply("当前有进行中的会话，请使用管理员提供的多人邀请码加入。");
+    else await ctx.reply("当前没有进行中的会话，请等待管理员发起会话。");
+    return;
+  }
+  await ctx.reply(`已识别为管理员。强度上限为 ${strengthLimit}，每次可调整 ±1、±3 或 ±5。`, adminMenu());
+});
+
+bot.command("help", async (ctx) => {
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type)) return;
+  await ctx.reply([
+    "/start 邀请码  打开并加入会话",
+    "/join 邀请码   加入当前会话",
+    "/panel          打开当前控制面板",
+    "/queue          加入10秒临时操作队列",
+    "/status         查看设备和会话状态",
+    "/bindgroup 邀请码  管理员在群内绑定会话",
+    "/invite         管理员查看多人邀请码",
+    "活动模式每五秒结算 A/B 强度和 A/B 波形四类结果。",
+  ].join("\n"), isOwner(ctx.from.id) ? adminMenu() : undefined);
+});
+
+bot.command("bindgroup", async (ctx) => {
+  if (!isOwner(ctx.from.id)) { await ctx.reply("只有管理员可以绑定群聊。"); return; }
+  if (!isGroupType(ctx.chat.type)) { await ctx.reply("请在目标群聊中发送此命令。"); return; }
+  if (!session || !inviteCodeMatches(inviteCode, commandArgument(ctx.message.text))) { await ctx.reply("当前没有会话，或邀请码不正确。"); return; }
+  boundGroupId = ctx.chat.id;
+  session.config.chatId = ctx.chat.id;
+  await ctx.reply("群聊已绑定到当前会话。邀请码仍可由多人重复使用。");
+  if (session.snapshot().state === "active") await publishGroupPanel(ctx.chat.id);
+});
+
+bot.command("invite", async (ctx) => {
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !isOwner(ctx.from.id) || !session) return;
+  await ctx.reply(await inviteText());
+});
+
+bot.command("connect", async (ctx) => {
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !isOwner(ctx.from.id)) return;
+  try { await device.connect(); await device.emergencyStop(); await ctx.reply("设备已连接，A/B 已归零。现在可以创建会话。"); }
+  catch (error) { await ctx.reply(`连接失败：${errorText(error)}`); }
 });
 
 bot.command("newsession", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id) || !isOwner(ctx.from.id)) return;
-  if (session && session.snapshot().state === "active") {
-    await ctx.reply("已有进行中的会话，请先 /stop 或 /disarm。");
-    return;
-  }
-  const mode: Mode = ctx.message.text.includes("voting") ? "voting" : "collaboration";
-  session = new ControlSession({ id: crypto.randomUUID(), chatId: ctx.chat.id, ownerUserId, mode, limitA: strengthLimit, limitB: strengthLimit, durationMs: sessionDurationMs, startedAt: 0, expiresAt: 0 }, device, strengthLimit, 2, actionWindowMs, voteWindowMs, Date.now, actionsPerWindow);
-  await ctx.reply(`会话已创建（尚未启动），模式：${mode === "voting" ? "投票" : "管理员"}。请点击“授权并启动会话”。`, adminMenu());
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !isOwner(ctx.from.id)) return;
+  if (session?.snapshot().state === "active") { await ctx.reply("已有进行中的会话，请先 /stop 或 /disarm。"); return; }
+  const argument = commandArgument(ctx.message.text).toLowerCase();
+  const mode: Mode = argument.includes("event") || argument.includes("活动") ? "event" : argument.includes("voting") || argument.includes("投票") ? "voting" : "collaboration";
+  createSession(mode, ctx.chat.id);
+  await ctx.reply(`会话已创建（尚未启动），模式：${modeText(mode)}。\n${await inviteText()}\n请点击“授权并启动会话”。`, adminMenu());
 });
 
 bot.command("arm", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id) || !isOwner(ctx.from.id) || !session) return;
-  if (session.snapshot().state !== "draft") {
-    await ctx.reply("会话已经启动或已结束，请使用当前面板操作。", session.snapshot().state === "active" ? panel(session.config.id) : adminMenu());
-    return;
-  }
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !isOwner(ctx.from.id) || !session) return;
+  if (session.snapshot().state !== "draft") { await ctx.reply("会话已经启动或已结束。", session.snapshot().state === "active" ? panel(session.config.id) : adminMenu()); return; }
   try {
     await session.arm();
-    await ctx.reply(await panelText(), panel(session.config.id));
+    await initializeDefaultLevels();
+    await ctx.reply(`${await panelText()}\n\n${await inviteText()}`, panel(session.config.id));
   } catch (error) {
     await ctx.reply(`启动失败：${errorText(error)}\n请确认 DG-LAB 已开机、靠近 Mac 且未被其他 App 占用。`, adminMenu());
   }
 });
 
 bot.command("join", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id) || !session) return;
-  if (session.snapshot().mode === "collaboration" && !isOwner(ctx.from.id)) {
-    const message = await ctx.reply("当前是管理员模式，只有管理员可以操作。");
-    setTimeout(() => { void ctx.telegram.deleteMessage(ctx.chat.id, message.message_id).catch(() => undefined); }, 5000).unref?.();
-    return;
-  }
-  session.addParticipant(ctx.from.id, ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name);
-  await ctx.reply(await panelText(), panel(session.config.id));
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !session) return;
+  try {
+    if (session.snapshot().mode === "collaboration" && !isOwner(ctx.from.id)) throw new Error("当前是管理员模式，其他成员只能查看");
+    await joinCurrentSession(ctx.from.id, displayName(ctx.from), ctx.chat.id, commandArgument(ctx.message.text));
+    await ctx.reply(await panelText(), panel(session.config.id));
+  } catch (error) { await ctx.reply(errorText(error)); }
+});
+
+bot.command("queue", async (ctx) => {
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !session) return;
+  try {
+    if (session.snapshot().mode !== "event") throw new Error("只有活动/直播模式提供临时操作队列");
+    if (!session.isParticipant(ctx.from.id)) throw new Error("请先加入会话");
+    await assertBoundGroupMember(ctx.from.id);
+    const position = enqueueTemporaryOperator({ userId: ctx.from.id, displayName: displayName(ctx.from) });
+    await ctx.reply(position === 0 ? "你已获得10秒临时操作权。" : `已加入操作队列，当前排位：${position}。`);
+  } catch (error) { await ctx.reply(errorText(error)); }
 });
 
 bot.command("panel", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id) || !session || session.snapshot().state !== "active") return;
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !session || session.snapshot().state !== "active") return;
   await ctx.reply(await panelText(), panel(session.config.id));
 });
 
 bot.command("stop", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id) || !session || !isOwner(ctx.from.id)) return;
-  await session.stop();
-  stopAutoRamp();
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !session || !isOwner(ctx.from.id)) return;
+  await stopSession();
   await ctx.reply("已立即停止并归零。");
 });
 
 bot.command("disarm", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id) || !isOwner(ctx.from.id) || !session) return;
-  await session.stop();
-  stopAutoRamp();
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !isOwner(ctx.from.id) || !session) return;
+  await stopSession();
   await ctx.reply("会话已撤销授权并归零。");
 });
 
 bot.command("status", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id)) return;
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type)) return;
   const deviceStatus = await device.getStatus();
-  const sessionStatus = session?.snapshot();
-  await ctx.reply(sessionStatus
-    ? `设备：${deviceStatus.connected ? "已连接" : "未连接"}\n电量：${deviceStatus.battery}%\nA=${deviceStatus.strengthA} B=${deviceStatus.strengthB}\n会话：${stateText(sessionStatus.state)}，参与者 ${sessionStatus.participants}`
-    : `设备：${deviceStatus.connected ? "已连接" : "未连接"}\n电量：${deviceStatus.battery}%\nA=${deviceStatus.strengthA} B=${deviceStatus.strengthB}\n当前没有会话`);
+  const status = session?.snapshot();
+  await ctx.reply(status
+    ? `设备：${deviceStatus.connected ? "已连接" : "未连接"}\n电量：${deviceStatus.battery}%\nA=${deviceStatus.strengthA} B=${deviceStatus.strengthB}\n会话：${stateText(status.state)}，模式：${modeText(status.mode)}，参与者 ${status.participants}`
+    : `设备：${deviceStatus.connected ? "已连接" : "未连接"}\n电量：${deviceStatus.battery}%\n当前没有会话`);
 });
 
 bot.command("disconnect", async (ctx) => {
-  if (!inAllowedChat(ctx.chat.id) || !isOwner(ctx.from.id)) return;
-  if (session) await session.stop().catch(() => undefined);
-  stopAutoRamp();
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !isOwner(ctx.from.id)) return;
+  if (session) await stopSession().catch(() => undefined);
   await device.disconnect();
   session = null;
+  inviteCode = "";
   await ctx.reply("设备已停止并断开。");
 });
 
 bot.on("callback_query", async (ctx) => {
-  if (!("data" in ctx.callbackQuery) || !ctx.chat || !inAllowedChat(ctx.chat.id)) return;
-  await ctx.answerCbQuery();
+  if (!("data" in ctx.callbackQuery) || !ctx.chat || !inAllowedChat(ctx.chat.id, ctx.chat.type)) return;
+  let answered = false;
+  const answer = async (text?: string) => {
+    if (answered) return;
+    answered = true;
+    await ctx.answerCbQuery(text).catch(() => undefined);
+  };
   const raw = ctx.callbackQuery.data;
   if (raw.startsWith("menu_")) {
-    if (!isOwner(ctx.from.id)) {
-      await ctx.reply("只有管理员可以执行此操作。");
-      return;
-    }
+    await answer();
+    if (!isOwner(ctx.from.id)) { await ctx.reply("只有管理员可以执行此操作。"); return; }
     try {
       if (raw === "menu_connect") {
-        await device.connect();
-        await device.emergencyStop();
-        await ctx.reply("设备已连接，A/B 已归零。", adminMenu());
+        await device.connect(); await device.emergencyStop(); await ctx.reply("设备已连接，A/B 已归零。", adminMenu());
       } else if (raw === "menu_status") {
         await ctx.reply(await panelText(), session?.snapshot().state === "active" ? panel(session.config.id) : adminMenu());
-      } else if (raw === "menu_new_collab" || raw === "menu_new_vote") {
-        if (session && session.snapshot().state === "active") {
-          await ctx.reply("已有进行中的会话，请先撤销。", panel(session.config.id));
-          return;
-        }
-        const mode: Mode = raw === "menu_new_vote" ? "voting" : "collaboration";
-        session = new ControlSession({ id: crypto.randomUUID(), chatId: ctx.chat.id, ownerUserId, mode, limitA: strengthLimit, limitB: strengthLimit, durationMs: sessionDurationMs, startedAt: 0, expiresAt: 0 }, device, strengthLimit, 2, actionWindowMs, voteWindowMs, Date.now, actionsPerWindow);
-        await session.arm();
+      } else if (raw === "menu_new_collab" || raw === "menu_new_vote" || raw === "menu_new_event") {
+        if (session?.snapshot().state === "active") { await ctx.reply("已有进行中的会话，请先撤销。", panel(session.config.id)); return; }
+        const mode: Mode = raw === "menu_new_event" ? "event" : raw === "menu_new_vote" ? "voting" : "collaboration";
+        createSession(mode, ctx.chat.id);
+        await session!.arm();
         await initializeDefaultLevels();
-        await ctx.reply(await panelText(), panel(session.config.id));
+        await ctx.reply(`${await panelText()}\n\n${await inviteText()}`, panel(session!.config.id));
       } else if (raw === "menu_arm") {
         if (!session) { await ctx.reply("请先创建会话。", adminMenu()); return; }
-        if (session.snapshot().state !== "draft") {
-          await ctx.reply("会话已经启动或已结束，请使用当前面板操作。", session.snapshot().state === "active" ? panel(session.config.id) : adminMenu());
-          return;
-        }
-        await session.arm();
-        await initializeDefaultLevels();
-        await ctx.reply(await panelText(), panel(session.config.id));
+        if (session.snapshot().state !== "draft") { await ctx.reply("会话已经启动或已结束。", session.snapshot().state === "active" ? panel(session.config.id) : adminMenu()); return; }
+        await session.arm(); await initializeDefaultLevels(); await ctx.reply(`${await panelText()}\n\n${await inviteText()}`, panel(session.config.id));
+      } else if (raw === "menu_invite") {
+        if (!session) { await ctx.reply("请先创建会话。", adminMenu()); return; }
+        await ctx.reply(await inviteText());
       } else if (raw === "menu_disarm") {
-        if (session) await session.stop();
+        if (session) await stopSession();
         await ctx.reply("会话已撤销并归零。", adminMenu());
       } else if (raw === "menu_disconnect") {
-        if (session) await session.stop().catch(() => undefined);
-        await device.disconnect();
-        session = null;
-        await ctx.reply("设备已停止并断开。", adminMenu());
+        if (session) await stopSession().catch(() => undefined);
+        await device.disconnect(); session = null; inviteCode = ""; await ctx.reply("设备已停止并断开。", adminMenu());
       }
-    } catch (error) {
-      await ctx.reply(`操作失败：${errorText(error)}`, adminMenu());
-    }
+    } catch (error) { await ctx.reply(`操作失败：${errorText(error)}`, adminMenu()); }
     return;
   }
-  if (!session) return;
+  if (!session) { await answer("当前没有会话"); return; }
   const code = parseCallbackData(raw, session.config.id);
-  if (!code) {
-    await ctx.reply("此控制面板已失效，请使用 /panel 获取当前面板。");
-    return;
-  }
+  if (!code) { await answer("此控制面板已失效"); return; }
   const actions: Record<string, Action> = {
     a_p1: { type: "strength_delta", channel: "A", delta: 1 }, a_p3: { type: "strength_delta", channel: "A", delta: 3 }, a_p5: { type: "strength_delta", channel: "A", delta: 5 },
     a_m1: { type: "strength_delta", channel: "A", delta: -1 }, a_m3: { type: "strength_delta", channel: "A", delta: -3 }, a_m5: { type: "strength_delta", channel: "A", delta: -5 },
@@ -283,85 +532,86 @@ bot.on("callback_query", async (ctx) => {
     b_m1: { type: "strength_delta", channel: "B", delta: -1 }, b_m3: { type: "strength_delta", channel: "B", delta: -3 }, b_m5: { type: "strength_delta", channel: "B", delta: -5 },
     wa0: { type: "waveform", channel: "A", waveformId: "imported_0", durationMs: 9999 }, wa1: { type: "waveform", channel: "A", waveformId: "imported_1", durationMs: 9999 }, wa2: { type: "waveform", channel: "A", waveformId: "imported_2", durationMs: 9999 }, wa3: { type: "waveform", channel: "A", waveformId: "imported_3", durationMs: 9999 }, wa4: { type: "waveform", channel: "A", waveformId: "imported_4", durationMs: 9999 }, wa5: { type: "waveform", channel: "A", waveformId: "imported_5", durationMs: 9999 },
     wb0: { type: "waveform", channel: "B", waveformId: "imported_0", durationMs: 9999 }, wb1: { type: "waveform", channel: "B", waveformId: "imported_1", durationMs: 9999 }, wb2: { type: "waveform", channel: "B", waveformId: "imported_2", durationMs: 9999 }, wb3: { type: "waveform", channel: "B", waveformId: "imported_3", durationMs: 9999 }, wb4: { type: "waveform", channel: "B", waveformId: "imported_4", durationMs: 9999 }, wb5: { type: "waveform", channel: "B", waveformId: "imported_5", durationMs: 9999 },
-    w_soft: { type: "waveform", channel: "A", waveformId: "soft", durationMs: 1000 },
-    w_rhythm: { type: "waveform", channel: "A", waveformId: "rhythm", durationMs: 3000 },
-    w_rise: { type: "waveform", channel: "A", waveformId: "rise", durationMs: 3000 },
     stop: { type: "stop" },
   };
   try {
-    if (session.snapshot().mode === "collaboration" && !isOwner(ctx.from.id)) {
-      const message = await ctx.reply("当前是管理员模式，只有管理员可以操作。");
-      setTimeout(() => { void ctx.telegram.deleteMessage(ctx.chat!.id, message.message_id).catch(() => undefined); }, 5000).unref?.();
-      return;
-    }
-    if (code === "auto_ramp_toggle" || code === "auto_ramp_rate") {
-      if (!isOwner(ctx.from.id)) { await ctx.reply("只有管理员可以使用自动提升。"); return; }
-      if (code === "auto_ramp_toggle") {
-        if (autoRampTimer) stopAutoRamp(); else startAutoRamp();
-      } else {
-        const rates = [3, 5, 7, 11, 13];
-        autoRampRateSeconds = rates[(rates.indexOf(autoRampRateSeconds) + 1) % rates.length] ?? 3;
-      }
-      await ctx.editMessageText(await panelText(), panel(session.config.id));
-      return;
-    }
+    const status = session.snapshot();
+    if (status.mode === "collaboration" && !isOwner(ctx.from.id)) throw new Error("当前是管理员模式，只有管理员可以操作");
     if (code === "join") {
-      session.addParticipant(ctx.from.id, ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name);
-      await ctx.editMessageText(await panelText(), panel(session.config.id));
-      return;
+      await joinCurrentSession(ctx.from.id, displayName(ctx.from), ctx.chat.id);
+      await answer("已加入当前会话");
+    } else if (code === "leave") {
+      session.removeParticipant(ctx.from.id); removeFromOperatorQueue(ctx.from.id); await answer("已退出当前会话");
+    } else if (code === "queue_join") {
+      if (status.mode !== "event") throw new Error("当前不是活动模式");
+      if (!session.isParticipant(ctx.from.id)) throw new Error("请先加入会话");
+      await assertBoundGroupMember(ctx.from.id);
+      const position = enqueueTemporaryOperator({ userId: ctx.from.id, displayName: displayName(ctx.from) });
+      await answer(position === 0 ? "你已获得10秒临时操作权" : `已加入队列，排位 ${position}`);
+    } else if (code === "queue_leave") {
+      removeFromOperatorQueue(ctx.from.id); await answer("已退出操作队列");
+    } else if (code === "operator_draw") {
+      if (!isOwner(ctx.from.id)) throw new Error("只有管理员可以抽取临时操作员");
+      const selected = drawRandomOperator(); await answer(`已抽取 ${selected.displayName}`);
+    } else if (code === "pool_cycle") {
+      if (!isOwner(ctx.from.id)) throw new Error("只有管理员可以设置动作池");
+      actionPoolPreset = ACTION_POOL_ORDER[(ACTION_POOL_ORDER.indexOf(actionPoolPreset) + 1) % ACTION_POOL_ORDER.length] ?? "all";
+      await answer(`动作池已切换为：${poolText()}`);
+    } else if (code === "auto_ramp_toggle" || code === "auto_ramp_rate") {
+      if (!isOwner(ctx.from.id)) throw new Error("只有管理员可以使用自动提升");
+      if (code === "auto_ramp_toggle") { if (autoRampTimer) stopAutoRamp(); else startAutoRamp(); }
+      else { const rates = [3, 5, 7, 11, 13]; autoRampRateSeconds = rates[(rates.indexOf(autoRampRateSeconds) + 1) % rates.length] ?? 3; }
+      await answer();
+    } else {
+      const action = actions[code];
+      if (!action) { await answer("未知操作"); return; }
+      if (!isActionAllowed(action)) throw new Error(`当前管理员动作池不允许此操作：${poolText()}`);
+      if (action.type === "stop") {
+        if (!isOwner(ctx.from.id)) throw new Error("只有管理员可以停止会话");
+        await stopSession(); await answer("已立即停止并归零");
+      } else if (isOwner(ctx.from.id) || (temporaryOperator?.userId === ctx.from.id && temporaryOperator.expiresAt > Date.now())) {
+        if (isOwner(ctx.from.id)) await session.applyOwnerAction(action);
+        else await session.applyTemporaryOperatorAction(ctx.from.id, action);
+        await answer("操作已立即生效");
+      } else {
+        await assertBoundGroupMember(ctx.from.id);
+        const result = await session.submit(ctx.from.id, action);
+        await answer(`投票已记录：${result.votes}票，5秒后结算`);
+      }
     }
-    if (code === "leave") {
-      session.removeParticipant(ctx.from.id);
-      await ctx.editMessageText(await panelText(), panel(session.config.id));
-      return;
-    }
-    const action = actions[code];
-    if (!action) return;
-    if (action.type === "stop") {
-      if (!isOwner(ctx.from.id)) { await ctx.reply("只有管理员可以停止不限时会话。"); return; }
-      stopAutoRamp();
-    }
-    const result = await session.submit(ctx.from.id, action);
-    try {
-      await ctx.editMessageText(await panelText(), panel(session.config.id));
-    } catch {
-      await ctx.reply(await panelText(), panel(session.config.id));
-    }
-    if (!result.accepted && session.snapshot().mode === "voting") {
-      const voteMessage = await ctx.reply(`投票已记录：${result.votes} 票，5 秒后按最终票数最高的动作生效。`);
-      setTimeout(() => { void ctx.telegram.deleteMessage(ctx.chat!.id, voteMessage.message_id).catch(() => undefined); }, 5000).unref?.();
-    }
-  } catch (error) {
-    const errorMessage = await ctx.reply(errorText(error));
-    setTimeout(() => { void ctx.telegram.deleteMessage(ctx.chat!.id, errorMessage.message_id).catch(() => undefined); }, 5000).unref?.();
-  }
+    if (ctx.chat.id === boundGroupId) scheduleSharedPanelRefresh();
+    else await ctx.editMessageText(await panelText(), panel(session.config.id)).catch(() => undefined);
+    scheduleSharedPanelRefresh();
+  } catch (error) { await answer(errorText(error)); }
 });
 
-bot.catch((error, ctx) => {
-  console.error("Telegram handler error", error);
-  void ctx.reply("操作失败，设备已保持安全状态。请稍后重试。", adminMenu()).catch(() => undefined);
-});
+bot.catch((error) => { console.error("Telegram handler error", error); });
 
 bot.launch().then(async () => {
   await bot.telegram.setMyCommands([
-    { command: "start", description: "打开控制面板" },
+    { command: "start", description: "打开控制面板或使用邀请码加入" },
     { command: "help", description: "查看中文操作说明" },
-    { command: "join", description: "加入当前会话" },
+    { command: "join", description: "使用多人邀请码加入会话" },
+    { command: "queue", description: "加入10秒临时操作队列" },
     { command: "status", description: "查看设备和会话状态" },
+    { command: "panel", description: "打开当前控制面板" },
+    { command: "bindgroup", description: "管理员：绑定当前群聊" },
+    { command: "invite", description: "管理员：查看多人邀请码" },
     { command: "connect", description: "管理员：连接 DG-LAB 设备" },
     { command: "newsession", description: "管理员：创建会话" },
     { command: "arm", description: "管理员：授权并启动会话" },
-    { command: "panel", description: "打开当前控制面板" },
     { command: "stop", description: "管理员：停止会话" },
     { command: "disarm", description: "管理员：撤销并归零" },
     { command: "disconnect", description: "管理员：停止并断开设备" },
   ]);
-  console.log(`DG-LAB Telegram bot started in ${process.env.DG_DEVICE_MODE === "ble" ? "BLE" : "MOCK"} mode`);
+  console.log(`DG-LAB Telegram bot started in ${config.deviceMode === "ble" ? "BLE" : "MOCK"} mode`);
+  console.log(`OBS overlay: http://${obsHost}:${obsPort}/obs`);
 });
 
 async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   await session?.stop().catch(() => undefined);
   await device.disconnect().catch(() => undefined);
+  obsServer.close();
   bot.stop(signal);
 }
 

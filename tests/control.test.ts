@@ -4,6 +4,9 @@ import { ControlSession } from "../src/control.js";
 import { encodeStrengthFrame, encodeWaveFrame } from "../src/coyote-v2.js";
 import { callbackData, parseCallbackData } from "../src/bot-security.js";
 import { loadConfig } from "../src/config.js";
+import { createInviteCode, inviteCodeMatches, normalizeInviteCode } from "../src/session-access.js";
+import { startObsOverlay } from "../src/obs-overlay.js";
+import { once } from "node:events";
 
 function make(mode: "collaboration" | "voting") {
   const device = new MockDevice();
@@ -30,6 +33,23 @@ describe("ControlSession", () => {
     expect(parseCallbackData(data, old)).toBeNull();
     expect(parseCallbackData("a_up", current)).toBeNull();
   });
+  it("creates a reusable normalized invite code", () => {
+    const code = createInviteCode();
+    expect(code).toMatch(/^[A-Z2-9]{8}$/);
+    expect(inviteCodeMatches(code, code)).toBe(true);
+    expect(inviteCodeMatches(code, code.toLowerCase())).toBe(true);
+    expect(inviteCodeMatches(code, "WRONG123")).toBe(false);
+    expect(normalizeInviteCode(` ${code} `)).toBe(code);
+  });
+  it("serves OBS overlay state on localhost", async () => {
+    const server = startObsOverlay("127.0.0.1", 0, () => ({ active: true, mode: "活动/直播", participants: 12, strengthA: 3, strengthB: 5, waveformA: "波浪", waveformB: "按揉", votes: ["A +1=2票"], roundRemainingSeconds: 4, temporaryOperator: "测试员", operatorRemainingSeconds: 8, queueLength: 2 }));
+    if (!server.listening) await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("OBS test server did not bind TCP");
+    const state = await fetch(`http://127.0.0.1:${address.port}/state`).then((response) => response.json()) as { participants: number };
+    expect(state.participants).toBe(12);
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
   it("limits collaborative changes to one-step and the session cap", async () => {
     const { device, session } = make("collaboration");
     await session.arm();
@@ -54,15 +74,27 @@ describe("ControlSession", () => {
     expect((await device.getStatus()).strengthA).toBe(1);
   }, 10000);
 
-  it("lets any participant stop immediately", async () => {
+  it("prevents a participant from stopping the session", async () => {
     const { device, session } = make("collaboration");
     await session.arm();
     session.addParticipant(10, "操作员甲");
     await session.submit(10, { type: "strength_delta", channel: "A", delta: 1 });
-    await session.submit(10, { type: "stop" });
+    await expect(session.submit(10, { type: "stop" })).rejects.toThrow("只有管理员可以停止会话");
+    expect((await device.getStatus()).strengthA).toBe(1);
+    await session.stop();
     expect((await device.getStatus()).strengthA).toBe(0);
     expect(session.snapshot().state).toBe("stopped");
     expect(session.snapshot().operators).toEqual(["操作员甲"]);
+  });
+
+  it("lets a temporary operator act immediately in event mode", async () => {
+    const device = new MockDevice();
+    const session = new ControlSession({ id: "event1", chatId: -100, ownerUserId: 1, mode: "event", limitA: 10, limitB: 10, durationMs: 60_000, startedAt: 0, expiresAt: 0 }, device, 133, 2, 1000, 5000, Date.now, 3);
+    await session.arm();
+    session.addParticipant(20, "临时操作员");
+    await session.applyTemporaryOperatorAction(20, { type: "strength_delta", channel: "A", delta: 3 });
+    expect((await device.getStatus()).strengthA).toBe(3);
+    expect(session.snapshot().voteCounts).toHaveLength(0);
   });
 
   it("starts the session clock on arm and expires safely", async () => {

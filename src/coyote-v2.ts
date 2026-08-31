@@ -1,5 +1,6 @@
 import noble, { type Characteristic, type Peripheral } from "@stoprocent/noble";
 import type { Channel, Device } from "./device.js";
+import { IMPORTED_V2_WAVEFORMS, type V2Frame } from "./waveform-compiler.js";
 
 export const COYOTE_V2_NAME = "D-LAB ESTIM01";
 export const V2_SERVICE = "180b";
@@ -9,16 +10,11 @@ export const V2_STRENGTH_CHAR = "1504";
 export const V2_B_WAVE_CHAR = "1505";
 export const V2_A_WAVE_CHAR = "1506";
 
-export const V2_WAVEFORMS: Record<string, Array<[number, number, number]>> = {
+export const V2_WAVEFORMS: Record<string, V2Frame[]> = {
   soft: [[1, 9, 0], [1, 9, 4], [1, 9, 8], [1, 9, 12], [1, 9, 16], [1, 9, 20], [1, 9, 0]],
   rhythm: [[5, 95, 8], [5, 95, 16], [5, 95, 20], [1, 9, 8], [1, 9, 16], [1, 9, 20]],
   rise: [[1, 14, 4], [1, 9, 8], [1, 9, 12], [1, 9, 16], [1, 9, 20], [1, 9, 0]],
-  imported_0: [[1, 399, 0], [1, 425, 2]],
-  imported_1: [[1, 499, 0], [1, 1000, 2]],
-  imported_2: [[1, 0, 0], [1, 128, 2], [1, 0, 4], [1, 238, 6], [1, 0, 8], [1, 309, 10], [1, 0, 12], [1, 413, 14], [1, 0, 16], [1, 512, 18], [1, 0, 20], [1, 607, 22], [1, 0, 24], [1, 749, 26], [1, 0, 28]],
-  imported_3: [[1, 1000, 0], [1, 1000, 2], [1, 1000, 4], [1, 1000, 6], [1, 1000, 8], [1, 1000, 10], [1, 1000, 12], [1, 1000, 14], [1, 1000, 16], [1, 1000, 18], [1, 1000, 20]],
-  imported_4: [[1, 242, 0], [1, 621, 2], [1, 375, 4], [1, 690, 6], [1, 437, 8], [1, 761, 10], [1, 525, 12], [1, 878, 14], [1, 577, 16], [1, 931, 18], [1, 0, 20]],
-  imported_5: [[1, 0, 0], [1, 200, 2], [1, 400, 4], [1, 600, 6], [1, 800, 8], [1, 1000, 10], [1, 1000, 12], [1, 1000, 14], [1, 1000, 16], [1, 1000, 18]],
+  ...IMPORTED_V2_WAVEFORMS,
 };
 
 /** V2 packs X (5 bits), Y (10 bits), Z (5 bits) into little-endian 24 bits. */
@@ -48,7 +44,8 @@ export class CoyoteV2Device implements Device {
   private a = 0;
   private b = 0;
   private battery = 0;
-  private waveformGeneration = 0;
+  private waveformGenerationA = 0;
+  private waveformGenerationB = 0;
 
   constructor(private readonly targetName = COYOTE_V2_NAME) {}
 
@@ -109,24 +106,26 @@ export class CoyoteV2Device implements Device {
     const characteristic = this.require(channel === "A" ? this.aWave : this.bWave);
     const frames = V2_WAVEFORMS[waveformId];
     if (!frames) throw new Error(`unknown V2 waveform: ${waveformId}`);
-    const generation = ++this.waveformGeneration;
-    const endAt = durationMs >= 9999 ? Number.POSITIVE_INFINITY : Date.now() + Math.min(Math.max(durationMs, 100), 5000);
+    const generation = channel === "A" ? ++this.waveformGenerationA : ++this.waveformGenerationB;
+    const currentGeneration = () => channel === "A" ? this.waveformGenerationA : this.waveformGenerationB;
+    const endAt = durationMs >= 9999 ? Number.POSITIVE_INFINITY : Date.now() + Math.max(100, durationMs);
     // V2 consumes each waveform frame for roughly 100 ms, so refresh until the deadline.
     let frameIndex = 0;
-    while (Date.now() < endAt && generation === this.waveformGeneration) {
+    while (Date.now() < endAt && generation === currentGeneration()) {
       const frame = frames[frameIndex % frames.length];
       if (!frame) break;
       await characteristic.writeAsync(encodeWaveFrame(...frame), true);
       frameIndex += 1;
       await sleep(100);
     }
-    if (generation === this.waveformGeneration && this.peripheral?.state === "connected") {
+    if (generation === currentGeneration() && this.peripheral?.state === "connected") {
       await characteristic.writeAsync(encodeWaveFrame(0, 0, 0), true);
     }
   }
 
   async emergencyStop(): Promise<void> {
-    this.waveformGeneration += 1;
+    this.waveformGenerationA += 1;
+    this.waveformGenerationB += 1;
     if (this.strength && this.peripheral?.state === "connected") {
       await this.strength.writeAsync(encodeStrengthFrame(0, 0), true);
       await this.aWave?.writeAsync(encodeWaveFrame(0, 0, 0), true);

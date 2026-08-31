@@ -42,7 +42,7 @@ export class MockDevice implements Device {
 
   async playWaveform(channel: Channel, waveformId: string, durationMs: number): Promise<void> {
     if (!this.connected) throw new Error("device is not connected");
-    if (durationMs < 100 || durationMs > 5000) throw new Error("invalid duration");
+    if (durationMs < 100 || (!Number.isFinite(durationMs) && durationMs !== 9999)) throw new Error("invalid duration");
     this.events.push({ type: "playWaveform", channel, waveformId, durationMs });
   }
 

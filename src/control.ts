@@ -1,6 +1,6 @@
 import type { Channel, Device } from "./device.js";
 
-export type Mode = "collaboration" | "voting";
+export type Mode = "collaboration" | "voting" | "event";
 export type Action =
   | { type: "strength_delta"; channel: Channel; delta: 1 | 3 | 5 | -1 | -3 | -5 }
   | { type: "waveform"; channel: Channel; waveformId: string; durationMs: number }
@@ -43,6 +43,7 @@ export interface SessionSnapshot {
   limitB: number;
   expiresAt: number;
   voteCounts: Array<{ channel: Channel; action: Action; count: number }>;
+  voteRoundEndsAt: number;
   waveformA: string;
   waveformB: string;
 }
@@ -54,6 +55,7 @@ export class ControlSession {
   private readonly votes = new Map<string, Vote>();
   private readonly votedChannels = new Map<number, Set<string>>();
   private voteRoundTimer: ReturnType<typeof setTimeout> | null = null;
+  private voteRoundEndsAt = 0;
   private waveformA = "波浪";
   private waveformB = "波浪";
   private currentA = 0;
@@ -106,20 +108,17 @@ export class ControlSession {
 
   isParticipant(userId: number): boolean { return this.participants.has(userId); }
 
+  participantEntries(): Array<{ userId: number; displayName: string }> {
+    return [...this.participants].map(([userId, displayName]) => ({ userId, displayName }));
+  }
+
   async submit(userId: number, action: Action): Promise<{ accepted: boolean; votes: number; required: number }> {
     this.expireIfNeeded();
     if (this.state !== "active") throw new Error("会话尚未启动");
     if (!this.participants.has(userId)) throw new Error("你还没有加入会话");
-    if (action.type !== "stop") {
-      const now = this.now();
-      const times = (this.actionTimes.get(userId) ?? []).filter((time) => now - time < (this.actionCooldownMs > 0 ? this.actionCooldownMs : 1000));
-      if (times.length >= this.actionsPerWindow) throw new Error(`操作太频繁，每位用户每秒最多操作 ${this.actionsPerWindow} 次，请稍后再试`);
-      times.push(now);
-      this.actionTimes.set(userId, times);
-    }
+    if (action.type !== "stop") this.checkRateLimit(userId);
     if (action.type === "stop") {
-      await this.stop();
-      return { accepted: true, votes: 0, required: 0 };
+      throw new Error("只有管理员可以停止会话");
     }
     if (this.config.mode === "collaboration") {
       await this.enqueue(action);
@@ -137,8 +136,10 @@ export class ControlSession {
     vote.voters.add(userId);
     this.votes.set(key, vote);
     if (!this.voteRoundTimer) {
+      this.voteRoundEndsAt = this.now() + this.voteWindowMs;
       this.voteRoundTimer = setTimeout(() => {
         this.voteRoundTimer = null;
+        this.voteRoundEndsAt = 0;
         const entries = [...this.votes.values()];
         this.votes.clear();
         this.votedChannels.clear();
@@ -148,8 +149,8 @@ export class ControlSession {
             const channelEntries = entries.filter((item) => actionChannel(item.action) === channel && (item.action.type === "waveform" ? "waveform" : "strength") === category);
             if (!channelEntries.length) continue;
             const highest = Math.max(...channelEntries.map((item) => item.voters.size));
-            const winners = channelEntries.filter((item) => item.voters.size === highest);
-            if (winners.length === 1 && winners[0]) void this.enqueue(winners[0].action).catch(() => undefined);
+            const winner = channelEntries.find((item) => item.voters.size === highest);
+            if (winner) void this.enqueue(winner.action).catch(() => undefined);
           }
         }
       }, this.voteWindowMs);
@@ -164,9 +165,18 @@ export class ControlSession {
     await this.enqueue(action);
   }
 
+  async applyTemporaryOperatorAction(userId: number, action: Action): Promise<void> {
+    this.expireIfNeeded();
+    if (this.state !== "active") throw new Error("会话尚未启动");
+    if (!this.participants.has(userId)) throw new Error("你还没有加入会话");
+    if (action.type === "stop") throw new Error("临时操作员不能停止会话");
+    this.checkRateLimit(userId);
+    await this.enqueue(action);
+  }
+
   snapshot(): SessionSnapshot {
     this.expireIfNeeded();
-    return { state: this.state, mode: this.config.mode, participants: this.participants.size, operators: [...this.participants.values()], currentA: this.currentA, currentB: this.currentB, limitA: this.config.limitA, limitB: this.config.limitB, expiresAt: this.config.expiresAt, voteCounts: [...this.votes.values()].flatMap((vote) => { const channel = actionChannel(vote.action); return channel ? [{ channel, action: vote.action, count: vote.voters.size }] : []; }), waveformA: this.waveformA, waveformB: this.waveformB };
+    return { state: this.state, mode: this.config.mode, participants: this.participants.size, operators: [...this.participants.values()], currentA: this.currentA, currentB: this.currentB, limitA: this.config.limitA, limitB: this.config.limitB, expiresAt: this.config.expiresAt, voteCounts: [...this.votes.values()].flatMap((vote) => { const channel = actionChannel(vote.action); return channel ? [{ channel, action: vote.action, count: vote.voters.size }] : []; }), voteRoundEndsAt: this.voteRoundEndsAt, waveformA: this.waveformA, waveformB: this.waveformB };
   }
 
   async stop(): Promise<void> {
@@ -174,6 +184,7 @@ export class ControlSession {
     this.votedChannels.clear();
     if (this.voteRoundTimer) clearTimeout(this.voteRoundTimer);
     this.voteRoundTimer = null;
+    this.voteRoundEndsAt = 0;
     for (const timer of this.pendingVoteTimers) clearTimeout(timer);
     this.pendingVoteTimers.clear();
     this.state = "stopped";
@@ -227,6 +238,14 @@ export class ControlSession {
     if (this.state === "active" && this.config.expiresAt > 0 && this.now() >= this.config.expiresAt) {
       void this.stop();
     }
-    for (const [key, vote] of this.votes) if (vote.expiresAt <= this.now()) this.votes.delete(key);
+  }
+
+  private checkRateLimit(userId: number): void {
+    const now = this.now();
+    const windowMs = this.actionCooldownMs > 0 ? this.actionCooldownMs : 1000;
+    const times = (this.actionTimes.get(userId) ?? []).filter((time) => now - time < windowMs);
+    if (times.length >= this.actionsPerWindow) throw new Error(`操作太频繁，每位用户每秒最多操作 ${this.actionsPerWindow} 次，请稍后再试`);
+    times.push(now);
+    this.actionTimes.set(userId, times);
   }
 }

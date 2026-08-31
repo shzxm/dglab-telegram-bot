@@ -7,5 +7,7 @@
   "sessionDurationSeconds": 9999,
   "voteWindowSeconds": 5,
   "actionWindowMs": 1000,
-  "actionsPerWindow": 3
+  "actionsPerWindow": 3,
+  "obsHost": "127.0.0.1",
+  "obsPort": 8787
 }

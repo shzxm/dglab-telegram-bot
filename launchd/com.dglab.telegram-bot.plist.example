@@ -9,8 +9,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/opt/homebrew/bin/node</string>
-    <string>/ABSOLUTE/PATH/TO/dglab-telegram-bot/node_modules/.bin/tsx</string>
-    <string>/ABSOLUTE/PATH/TO/dglab-telegram-bot/src/index.ts</string>
+    <string>/ABSOLUTE/PATH/TO/dglab-telegram-bot/dist/src/index.js</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
