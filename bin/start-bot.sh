@@ -1,6 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 project_dir="${0:A:h:h}"
-token="$(/usr/bin/security find-generic-password -a "$USER" -s dglab-telegram-bot -w)"
+# The credential is stored in macOS Keychain under the service name;
+# its Keychain account does not necessarily match the macOS login name.
+token="$(/usr/bin/security find-generic-password -s dglab-telegram-bot -w)"
 export TG_BOT_TOKEN="$token"
-exec "$(command -v node)" "$project_dir/node_modules/.bin/tsx" "$project_dir/src/index.ts"
+exec /opt/homebrew/bin/node "$project_dir/dist/src/index.js"

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-export type DeviceMode = "mock" | "ble";
+export type DeviceMode = "mock" | "ble" | "ios";
 
 export interface AppConfig {
   token: string;
@@ -38,7 +38,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   const ownerUserId = parseSafeInteger(env.TG_OWNER_USER_ID ?? value(file.ownerUserId), "TG_OWNER_USER_ID");
   const allowedChatId = parseSafeInteger(env.TG_ALLOWED_CHAT_ID ?? value(file.allowedChatId) ?? String(ownerUserId), "TG_ALLOWED_CHAT_ID");
   const deviceMode = (env.DG_DEVICE_MODE ?? file.deviceMode ?? "mock") as string;
-  if (deviceMode !== "mock" && deviceMode !== "ble") throw new Error("DG_DEVICE_MODE must be mock or ble");
+  if (deviceMode !== "mock" && deviceMode !== "ble" && deviceMode !== "ios") throw new Error("DG_DEVICE_MODE must be mock, ble or ios");
   const strengthLimit = parseBoundedInteger(env.DG_STRENGTH_LIMIT ?? value(file.strengthLimit) ?? "133", "DG_STRENGTH_LIMIT", 1, 133);
   const sessionDurationMs = parseBoundedInteger(env.DG_SESSION_DURATION_SECONDS ?? value(file.sessionDurationSeconds) ?? "9999", "DG_SESSION_DURATION_SECONDS", 1, 24 * 60 * 60) * 1000;
   const voteWindowMs = parseBoundedInteger(env.DG_VOTE_WINDOW_SECONDS ?? value(file.voteWindowSeconds) ?? "5", "DG_VOTE_WINDOW_SECONDS", 1, 60) * 1000;

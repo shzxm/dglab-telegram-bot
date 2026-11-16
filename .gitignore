@@ -6,3 +6,9 @@ config.json
 .DS_Store
 work/
 outputs/
+
+# Native system audio meter is compiled for the local macOS architecture.
+bin/system-audio-meter
+
+# Private local operation notes (not part of the public project)
+控制命令说明.md

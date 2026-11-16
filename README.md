@@ -1,80 +1,79 @@
-# DG-LAB Telegram Bot
+# DG-LAB Telegram Bot for macOS
 
-这是一个运行在 macOS 上的 Telegram 控制器：Telegram Bot 接收按钮操作，Mac 通过蓝牙连接 DG-LAB 2 代设备。项目默认使用安全的模拟设备，不会连接蓝牙；只有明确配置 `deviceMode: "ble"` 后才会访问真实设备。
+[中文](README.md) · **Unofficial / community-developed** · [iOS App](https://github.com/shzxm/dglab-ios) · [MIT License](LICENSE)
 
-## 功能概览
+运行在 macOS 的 DG-LAB V2（`ESTIM01`）Telegram 多人控制服务。基于 **Node.js + TypeScript + Telegraf + BLE**，将 Telegram Bot 的管理员、投票、直播活动操作转换为设备会话与 A/B 控制。还提供 **独立 WebSocket 桥接**，可与 [DG-LAB Control for iOS](https://github.com/shzxm/dglab-ios) 协同工作。
 
-- 管理员模式：管理员单人直接控制，其他成员只能查看同一控制面板和状态变化。
-- 投票模式：成员分别为 A/B 强度和 A/B 波形投票，固定 5 秒统计，按各类别最高票动作执行。
-- 活动/直播模式：每 5 秒最多执行 A 强度、B 强度、A 波形、B 波形四个结果，支持 10 秒临时操作队列和随机抽取操作员。
-- 多人邀请码：每个会话生成一个可重复使用的邀请码和私聊深度链接，会话结束前可由多人加入。
-- 群聊绑定：管理员可把当前会话绑定到一个群聊，并发布一条共享控制面板。
-- 管理员动作池：活动模式可在全部、温和、仅强度、仅波形四种预设间切换。
-- OBS 叠加层：本机提供透明背景的参与人数、倒计时、票数、强度和临时操作员页面。
-- A/B 强度按钮：`+1`、`+3`、`+5`、`-1`、`-3`、`-5`。
-- 强度上限：133；每位用户最近 1 秒最多操作 3 次。
-- 会话时长：默认 9999 秒；管理员可随时停止、撤销并归零或断开设备。
-- 波形：内置导入的 6 组波形，可分别用于 A、B；波形投票生效后持续循环，直到切换或停止。
-- 自动提升：管理员专属，A/B 同步提升，最长 30 秒，可选每 3/5/7/11/13 秒一次。
-- 安全保护：启动时 A/B 归零；停止、断开、过期、BLE 写入失败时执行安全归零。
+> **非 DG-LAB 官方项目；实验性软件。** 新安装默认 `DG_DEVICE_MODE=mock`，不连接真实蓝牙。**强度上限 133 是软件取值范围，不是人体安全阈值**。真实设备测试必须有独立、立即可用的硬件停止手段。开发测试不能替代真实设备安全验收。
 
-## 工作流程
+## 核心功能
 
-```text
-Telegram 按钮
-    ↓
-权限检查 / 管理员模式或投票模式
-    ↓
-会话限幅、速率限制、5 秒投票结算
-    ↓
-Mac BLE 适配器
-    ↓
-DG-LAB ESTIM01（DG-LAB 2 代）
+| 模块 | 功能 |
+|---|---|
+| Telegram 单人控制 | 管理员会话，管理员直接操作 A/B 强度和波形；非管理员只读 |
+| 多人投票 | 邀请码、群绑定、5 秒投票窗口；A/B 强度、波形独立计票和结算 |
+| 活动/直播 | 10 秒临时操作员队列、随机选择操作员、动作池（全部、温和、仅强度、仅波形） |
+| A/B 强度 | `±1`、`±3`、`±5`、各通道独立会话限幅、按钮操作限速 |
+| 自动提升 | A/B 独立开关；每次自动 `+1`，间隔 **1–60 秒**，累计 **+1–33 级**或先达到通道上限即停止；Telegram 面板提供常用间隔直选，iOS 端有连续长滑杆 |
+| 波形 | 内置 6 种导入波形；A/B 各自播放、切换和循环，源代码提供额外基础波形编译能力 |
+| 系统音频 | ScreenCaptureKit 读取 macOS 输出的 RMS，不保存音频；音量响应与节拍响应可独立或同时开启 |
+| 节拍频率 | 固定 1、20、50、100 Hz 与多组区间预设；`/audiofreq <min> <max>` 支持 1–100 Hz，iOS 端可双手柄自定义例如 5–88 Hz |
+| OBS 叠加层 | `/obs` 浏览器叠加画面和 `/state` 状态 JSON，默认仅回环地址 |
+| iOS 桥接 | 远程控制 Mac BLE 或由 iPhone 取代 Mac 担任 BLE 主机；独立桥接密钥、状态快照、命令确认与本机授权 |
+| 安全机制 | 会话限时、设备停止/归零、投票/身份限制、启动丢弃 Telegram 离线积压命令、桥接命令限速 |
+
+**自动提升的累计上限是本轮真正自动执行的 +1 次数，不是目标绝对强度。** 例如初始 20，最大累计 +10，正常到 30 后停止；手动改变强度不算自动提升次数。调整间隔不会重置已累计次数，达到强度上限提前停止。手动关掉自动提升只取消计时器，**不自动降低已达到的强度**。紧急停止仍尝试双通道归零。
+
+节拍 Hz 指 DG-LAB V2 波形周期，而非音乐音调、输出电流或“刺激强度”。声音响应调制波形节奏，不自动更改 S 强度；但若用户同时开启自动提升，后者依然会提高强度。
+
+## 与 iOS App 如何协作
+
+**配套 App**：[github.com/shzxm/dglab-ios](https://github.com/shzxm/dglab-ios)。Bot 和 App 是两个独立项目，**Telegram Bot Token 只保留在 macOS**，手机仅使用另一份独立桥接密钥。
+
+| 工作模式 | macOS 的 `DG_DEVICE_MODE` | 谁连接 DG-LAB 蓝牙 | iOS App 扮演什么角色 |
+|---|---|---|---|
+| 仅 Telegram 调试 | `mock`（默认） | 无真实连接 | 可选；用于验证状态和命令 |
+| Telegram + Mac BLE | `ble` | **Mac** | 远程控制面板；Bot 管理 Telegram 群聊和蓝牙 |
+| Telegram + iPhone BLE 主机 | `ios` | **iPhone** | 设备主机；手机现场批准每次会话，Bot 负责 Telegram 多人逻辑 |
+| iOS 完全独立 | 不要求启动 Bot | **iPhone** | App 单独控制，与本仓库无运行时依赖 |
+
+```mermaid
+flowchart TD
+  TG[Telegram 私聊 / 群聊] --> BOT[macOS Bot: 身份、会话、投票、活动]
+  APP[iOS SwiftUI App] <-->|Bearer 鉴权 WebSocket: 8788| BOT
+  BOT -->|DG_DEVICE_MODE=ble| DEVICE[DG-LAB V2]
+  BOT -->|DG_DEVICE_MODE=ios 时转发硬件命令| APP
+  APP -->|iPhone CoreBluetooth| DEVICE
 ```
 
-项目当前使用 Mac 直连 BLE，不依赖 DgLabUnlocker 的 WebSocket 服务。DgLabUnlocker RPC 文档中的强度限制规则仍可作为协议参考：超过被控方限制的请求会被忽略。
+**两条 BLE 线路互斥。** `ios` 模式需要 iPhone 本地再次确认授权，不能用 iPhone 的桥接密钥绕过手机本地限幅。完整关系、协议和部署说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/IOS_BRIDGE.md](docs/IOS_BRIDGE.md)。
 
 ## 环境要求
 
-- macOS，已登录桌面用户
-- Node.js 20 或更高版本
-- npm
-- DG-LAB 2 代设备
-- Telegram Bot Token
-- 允许机器人加入的 Telegram 群（多人投票时需要）；如果群禁止机器人，可使用管理员私信模式
+- macOS，具备蓝牙硬件（真实 Mac BLE 模式），Node.js **20+**、npm；建议使用已登录桌面的用户运行。
+- Telegram BotFather 创建的 Bot Token；管理员 Telegram 数字 `user_id`。
+- DG-LAB V2 / ESTIM01（**只有真实设备模式**才需要）。
+- macOS 屏幕和系统音频录制权限（只有系统音频响应需要）。
+- iOS 协同时：单独随机生成的 `IOS_BRIDGE_TOKEN` 与可信网络/加密 WSS。
 
-## 获取代码
+## 快速启动：先从 Mock 开始
 
 ```bash
 git clone https://github.com/shzxm/dglab-telegram-bot.git
 cd dglab-telegram-bot
-npm install
-```
-
-## 创建 Telegram Bot
-
-1. 在 Telegram 打开 `@BotFather`。
-2. 使用 `/newbot` 创建机器人并保存 Token。
-3. 不要把 Token 写入 Git、截图、日志或聊天记录。
-4. 如果 Token 曾经泄露，先在 BotFather 撤销并重新生成。
-
-## 配置
-
-复制配置模板：
-
-```bash
+npm ci
 cp config.example.json config.json
 ```
 
-编辑 `config.json`：
+编辑 **未跟踪的** `config.json`（只是说明，使用前填写自己的管理员 ID / Bot Token；生产环境建议把 Token 放 Keychain）：
 
 ```json
 {
   "telegramToken": "REPLACE_WITH_BOTFATHER_TOKEN",
   "ownerUserId": 123456789,
-  "allowedChatId": -1001234567890,
+  "allowedChatId": 123456789,
   "deviceMode": "mock",
-  "strengthLimit": 133,
+  "strengthLimit": 30,
   "sessionDurationSeconds": 9999,
   "voteWindowSeconds": 5,
   "actionWindowMs": 1000,
@@ -84,185 +83,125 @@ cp config.example.json config.json
 }
 ```
 
-配置说明：
+`config.json`、`.env` 均已列入 `.gitignore`；环境变量可覆盖文件配置。默认用户 ID 示例是占位数据，**勿提交自己的实际 Token、Telegram ID 或聊天记录**。
 
-| 配置项 | 含义 |
-|---|---|
-| `telegramToken` | BotFather Token；生产环境建议改用 Keychain/环境变量 |
-| `ownerUserId` | 管理员 Telegram 数字 ID |
-| `allowedChatId` | 允许控制的私聊或群聊 ID；省略时默认为管理员私聊 |
-| `deviceMode` | `mock` 仅模拟，`ble` 连接真实设备 |
-| `strengthLimit` | 项目强度上限，当前最多 133 |
-| `sessionDurationSeconds` | 会话时长，默认 9999 秒 |
-| `voteWindowSeconds` | 投票统计窗口，默认 5 秒 |
-| `actionWindowMs` | 用户操作速率窗口，默认 1000 毫秒 |
-| `actionsPerWindow` | 速率窗口内最多操作次数，默认 3 |
-| `obsHost` | OBS 页面监听地址，默认只监听本机 `127.0.0.1` |
-| `obsPort` | OBS 页面端口，默认 `8787` |
-
-## 多人邀请码与群聊
-
-1. 管理员私聊 Bot，点击「授权并启动投票会话」或「授权并启动活动/直播会话」。
-2. Bot 会显示一个 8 位多人邀请码。邀请码在当前会话结束前可重复使用，没有单次使用限制。
-3. 私聊参与者可以打开 Bot 给出的 `t.me` 链接，或发送 `/join 邀请码`。
-4. 群聊使用时，先在 BotFather 开启允许加入群聊，再把 Bot 加入目标群。
-5. 为了可靠校验成员身份，建议只授予 Bot 查看成员所需的最小管理员权限，不需要读取普通聊天内容。
-6. 管理员在目标群发送 `/bindgroup 邀请码`，Bot 会发布共享控制面板。
-7. 活动模式下，普通成员每轮可分别投 A/B 强度和 A/B 波形各一次；五秒后每类只执行一个最高票结果。
-
-Telegram Bot API 不能查询当前视频聊天的完整参会名单，因此程序只能可靠限制为“当前绑定群成员”。如果必须严格识别正在视频聊天中的用户，需要额外的 MTProto 用户客户端，不能仅使用 Bot Token。
-
-## 活动模式与临时操作员
-
-- 「加入10秒操作队列」按先后顺序授予每人 10 秒立即操作权。
-- 「随机抽取操作员」由管理员从当前参与者中随机选出一人，授予 10 秒权限。
-- 临时操作员仍受强度上限、动作池和每秒最多 3 次操作限制，不能停止或断开设备。
-- 其他参与者继续使用五秒投票，不会把每次点击直接发送给设备。
-- 管理员可切换动作池：全部动作、温和动作、仅强度、仅波形。
-
-## OBS 直播叠加层
-
-服务启动后，在 OBS 中添加「浏览器」来源：
-
-```text
-http://127.0.0.1:8787/obs
-```
-
-推荐画布尺寸为 `760 × 420`。状态 JSON 位于 `http://127.0.0.1:8787/state`。默认只监听本机，不应直接暴露到公网。
-
-`config.json` 已被 `.gitignore` 排除，不能上传到公开仓库。环境变量会覆盖同名配置，支持 `TG_BOT_TOKEN`、`TG_OWNER_USER_ID`、`TG_ALLOWED_CHAT_ID`、`DG_DEVICE_MODE` 以及各项 `DG_*` 参数。
-
-## 获取 Telegram 数字 ID
-
-先确保 Bot 能接收消息，然后运行：
-
-```bash
-npm run telegram:ids
-```
-
-该命令只输出 `user_id`、`chat_id`、聊天类型和标题，不输出消息正文或 Token。多人投票时，把目标群的 `chat_id` 写入 `allowedChatId`；私信模式可以省略 `allowedChatId`。
-
-## 首次 Mock 验证
-
-先保持 `deviceMode` 为 `mock`：
+验证：
 
 ```bash
 npm run typecheck
 npm test
+npm run build
 npm run doctor
 npm run demo
 npm run dev
 ```
 
-模拟模式不会扫描、连接或刺激蓝牙设备。Telegram 菜单会自动设置为中文，包括 `/start`、`/help`、`/join`、`/status`、`/connect`、`/newsession`、`/arm`、`/panel`、`/stop`、`/disarm` 和 `/disconnect`。
+在 Telegram 中向 Bot 发送 `/start`、`/help`、`/status` 获取按钮和会话状态。常用命令还有 `/connect`、`/newsession`、`/arm`、`/panel`、`/stop`、`/disarm`、`/disconnect`、`/join <邀请码>`、`/audiofreq 5 88`。`/audiofreq 50 50` 表示固定 50 Hz。
 
-## macOS 蓝牙权限与真实设备
+## 从 Mock 切换到真实 Mac BLE
 
-1. 打开「系统设置 → 隐私与安全性 → 蓝牙」；允许 Terminal、Node 或启动 Bot 的终端访问蓝牙。
-2. 关闭手机 App 或其他程序对 DG-LAB 的连接。
-3. 打开 DG-LAB 设备并靠近 Mac。
-4. 运行只读扫描：
+1. 确认设备关闭其他手机端连接，Mac 已授予终端/Node 蓝牙权限，并且硬件停止方式触手可及。
+2. 使用 `npm run ble:scan` 扫描，`npm run ble:probe` 执行读取和归零探测；不要使用低强度测试标志，除非已做好真实设备安全准备。
+3. 在停止活动会话后，将 `deviceMode` / `DG_DEVICE_MODE` 改为 `ble`，再重新启动服务。
+4. 在 Telegram 中明确授权会话后才能操作。每轮结束可使用停止/断开按钮。
 
-   ```bash
-   npm run ble:scan
-   ```
+> 同一台设备不能同时被 iPhone App 和 Mac BLE 占用。`mock`、`ble`、`ios` 不要在活动会话期间切换。
 
-5. 扫描到 `D-LAB ESTIM01` 后运行安全探测：
+## Telegram 邀请、群聊与活动
 
-   ```bash
-   npm run ble:probe
-   ```
+- 管理员创建并授权会话后，Bot 生成可重复使用的短邀请码，Telegram 私聊用户可使用 `/join 邀请码` 加入。
+- 要在群聊共享控制面板，管理员使用 `/bindgroup 邀请码`；Bot 应具备足以验证群成员的权限，但不需要不必要的聊天内容读取权限。
+- 投票模式按强度和波形、A 和 B 四种类别分别结算；每个参与者每轮限投对应类别一次。
+- 活动模式支持 10 秒临时操作员、队列与管理员随机抽取；临时权限仍受强度/动作池/限速约束，不能停止或断开设备。
+- Bot API **无法可靠获取 Telegram 语音/视频聊天中的实时参会名单**；普通群成员身份不等于直播在线观众身份。
 
-   探测只连接、读取电量并归零，不播放波形。
+## A/B 自动提升与声音响应
 
-6. 需要最低强度短测试时，必须显式执行：
-
-   ```bash
-   BLE_LOW_TEST=1 npm run ble:probe
-   ```
-
-确认硬件正常后，把 `deviceMode` 改为 `ble`，再启动 Bot。Bot 已经连接设备时，另一个进程可能扫描不到设备，这是正常的；应以 Bot 面板中的“设备：已连接”和电量为准。
-
-## 启动 Bot
-
-前台运行：
+- Telegram 面板：两通道独立开关，提供 **1 / 3 / 5 / 7 / 11 / 13 / 17 秒**常用间隔按钮。
+- iOS App：长滑杆可选 1–60 秒整数间隔，并设置累计自动增加 1–33 级后自动关闭。修改执行中的间隔保留已累计的次数。
+- 音量响应：安静时波形按 0.25 倍步进播放，有音量时恢复常速，不会因为静音自动降强度。
+- 节拍响应：RMS 上升沿切换波形周期。固定模式不随节拍改变频率；区间模式在低/高频端切换。
+- Mac 原生系统音频辅助程序位于 [`native/system-audio-meter.swift`](native/system-audio-meter.swift)，仅输出数值化 RMS。构建命令：
 
 ```bash
-npm run dev
+mkdir -p bin
+swiftc -O -parse-as-library native/system-audio-meter.swift \
+  -o bin/system-audio-meter \
+  -framework ScreenCaptureKit -framework AVFoundation -framework CoreMedia
+mkdir -p "$HOME/.local/bin"
+cp bin/system-audio-meter "$HOME/.local/bin/dglab-system-audio-meter"
 ```
 
-管理员操作顺序：
+声控需要 macOS 的屏幕/系统音频权限；没有授权不能正常分析。捕获助手退出或连续 5 秒没有音频数值时，会尝试停止会话并归零。音频模式可以和自动提升独立开启，但叠加效果更难预测。
 
-1. 点击「连接设备」或直接点击「授权并启动管理员会话」/「授权并启动投票会话」/「授权并启动活动/直播会话」。
-2. 设备连接成功后，A/B 会先归零并设为初始强度 1。
-3. 管理员模式下，管理员按钮立即生效，其他成员只读。
-4. 投票模式下，成员加入后投票；5 秒后按 A/B 强度和波形各自的最高票执行。
-5. 管理员使用「撤销并归零」或「断开设备」结束会话。
+## OBS 叠加层
 
-## macOS LaunchAgent 常驻部署
+浏览器来源：`http://127.0.0.1:8787/obs`；JSON 状态：`http://127.0.0.1:8787/state`。推荐 OBS 浏览器源约 `760 × 420`。两者默认只对 Mac 本机开放，不应直接暴露在公网。
 
-### 1. 保存 Token 到 Keychain
+## 配置 iOS WebSocket 桥接
+
+**不启用时无需配置**。只要有至少 32 字符的 `IOS_BRIDGE_TOKEN`，程序即可启动独立桥接服务器；默认仅监听 `127.0.0.1:8788`。
 
 ```bash
-security add-generic-password -a "$USER" -s dglab-telegram-bot -w
-launchctl setenv TG_BOT_TOKEN "$(security find-generic-password -a "$USER" -s dglab-telegram-bot -w)"
+# 在 macOS 上生成单独的随机桥接密钥，不要输出到 GitHub / 日志
+openssl rand -hex 32
+
+# 示例使用变量名，正式部署建议从 Keychain 注入环境
+export IOS_BRIDGE_TOKEN="PASTE_YOUR_64_CHAR_RANDOM_HEX_SECRET_HERE"
+export IOS_BRIDGE_HOST="127.0.0.1"  # 本机默认；手机连接时改为受信任的 Mac LAN IP
+export IOS_BRIDGE_PORT="8788"
 ```
 
-### 2. 准备启动项
+在 iOS App「Telegram」界面填写 `ws://<Mac局域网IP>:8788` 和**桥接专用密钥**，选择「远程控制 Bot」；先用 `DG_DEVICE_MODE=mock` 测试，再决定是否启用 `ble` 或 `ios`。切换为 `ios` 之前需要停止现有会话、断开 Mac 蓝牙，并确认手机端已经建立独立 BLE 连接。
 
-复制 `launchd/com.dglab.telegram-bot.plist.example` 到：
+- Bot Token 只留在 Mac；App **不启动第二个 Telegram 轮询进程**。
+- 手机主机模式的 `device.connect` 必须在 iPhone 上再次现场同意，Mac 的 Telegram 管理员权限不能越过手机强度上限。
+- 桥接密钥视为管理员权限，绝不能发给参与投票的普通用户。
+- 非私有网络只使用 `wss://` 和额外访问控制，禁止把 `ws://:8788` 公网裸露。
 
-```text
-~/Library/LaunchAgents/com.dglab.telegram-bot.plist
-```
+更详细的端点列表、JSON 消息格式和权限限制见 [docs/IOS_BRIDGE.md](docs/IOS_BRIDGE.md)。
 
-把模板中的路径、管理员 ID、允许聊天 ID 和 `DG_DEVICE_MODE` 改成自己的值。启动项不应写入 Token。
+## 生产环境与 LaunchAgent
 
-### 3. 加载、查看和停止
+可使用 `npm run build` 的 `dist/src/index.js` 配合 macOS `LaunchAgent` 运行：
+
+1. 从 [`launchd/com.dglab.telegram-bot.plist.example`](launchd/com.dglab.telegram-bot.plist.example) 复制模板至 `~/Library/LaunchAgents/com.dglab.telegram-bot.plist`，根据自己的目录调整 `WorkingDirectory` 和启动脚本。
+2. 强烈建议使用 **macOS Keychain + 启动包装脚本**传递 `TG_BOT_TOKEN`、`IOS_BRIDGE_TOKEN`；不把凭证写入 plist 或版本库。
+3. 启动与检查：
 
 ```bash
 uid=$(id -u)
 launchctl bootstrap "gui/$uid" "$HOME/Library/LaunchAgents/com.dglab.telegram-bot.plist"
 launchctl print "gui/$uid/com.dglab.telegram-bot"
+# 仅在确认没有活动真实设备会话后重启
 launchctl kickstart -k "gui/$uid/com.dglab.telegram-bot"
-launchctl bootout "gui/$uid/com.dglab.telegram-bot"
 ```
 
-默认日志位置：`/tmp/dglab-telegram-bot.log` 和 `/tmp/dglab-telegram-bot.err.log`。
+**重启或替换设备模式前必须确认活动会话已结束并安全归零**。现有 Bot 启动时会丢弃排队的旧 Telegram 指令，避免重新启动后误执行历史按钮。
 
-## 故障排查
+## 项目结构
 
-### 提示“会话尚未启动”
-
-重新发送 `/start` 获取最新菜单，使用“授权并启动管理员会话”或“授权并启动投票会话”。旧面板可能引用已结束的会话。
-
-### Mac 显示蓝牙已开启但找不到设备
-
-确认设备开机、未被手机 App 占用、Mac 已解锁并授予蓝牙权限。若 Bot 已经连接设备，独立扫描进程可能看不到它。
-
-### 状态显示已连接但没有波形
-
-投票模式需要等待完整 5 秒结算；管理员模式会立即生效。波形生效后会持续循环，直到切换或停止。检查强度是否大于 0，并确认实体设备处于可立即停止的位置。
-
-### Bot 进程退出
-
-```bash
-npm run doctor
-tail -f /tmp/dglab-telegram-bot.err.log
+```text
+src/index.ts                Bot 命令、会话与 iOS 桥接路由
+src/control.ts              会话/投票/身份和强度约束
+src/coyote-v2.ts            Mac 蓝牙与波形写入
+src/auto-ramp.ts            双通道限额自动提升
+src/audio-reactive.ts       Mac 系统音频特征分析与频率映射
+src/ios-bridge.ts           独立 WebSocket 桥接服务
+src/ios-relay-device.ts     iPhone 蓝牙主机的代理设备
+native/system-audio-meter.swift  macOS ScreenCaptureKit RMS 助手
+src/obs-overlay.ts          OBS 状态服务
+config.example.json         安全示例配置
+launchd/                    macOS 服务模板
 ```
 
-### 重新配置
+## 测试与现有局限
 
-停止 LaunchAgent，修改 `config.json` 或环境变量后，再执行 `launchctl kickstart -k`。不要把实际配置文件提交到 GitHub。
+- `npm run typecheck && npm test && npm run build` 运行 Mock / 无实体设备测试。2026-11-16 已验证 **31 项 Vitest 测试通过**。
+- `iOS` 远程蓝牙主机协议和 CoreBluetooth 目前**未完成 iPhone 实物验收**；不能因为桥接测试通过就保证实际停止/归零消息一定能送达硬件。
+- `133` 是软件上限，不能用来推断人体耐受或医疗用途。
+- 如果要参与开发，请提交可复现的 Mock 测试与最小变更，不要上传 Token、家庭网络配置或聊天记录。更多说明见 [docs/SECURITY.md](docs/SECURITY.md)。
 
-## 安全建议
+## 许可
 
-- Token 只放在 Keychain、环境变量或未跟踪的 `config.json` 中。
-- 公开仓库只包含 `config.example.json` 和占位符。
-- 先用 `mock` 验证 Telegram 逻辑，再启用 BLE。
-- 真实设备测试从强度 1 开始，并确保实体设备旁边有可立即停止的方式。
-- 不要把 Bot 加入不受信任的群，也不要把管理员 ID 和聊天 ID 发布到截图中。
-
-## 开源许可
-
-本项目采用 MIT License，见 [LICENSE](LICENSE)。
+[MIT License](LICENSE)。本项目与 DG-LAB 官方没有隶属、背书或认证关系。

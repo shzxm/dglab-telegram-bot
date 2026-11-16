@@ -1,5 +1,5 @@
 import noble, { type Characteristic, type Peripheral } from "@stoprocent/noble";
-import type { Channel, Device } from "./device.js";
+import type { Channel, Device, WaveformModulation } from "./device.js";
 import { IMPORTED_V2_WAVEFORMS, type V2Frame } from "./waveform-compiler.js";
 
 export const COYOTE_V2_NAME = "D-LAB ESTIM01";
@@ -46,6 +46,7 @@ export class CoyoteV2Device implements Device {
   private battery = 0;
   private waveformGenerationA = 0;
   private waveformGenerationB = 0;
+  private readonly modulations: Partial<Record<Channel, WaveformModulation>> = {};
 
   constructor(private readonly targetName = COYOTE_V2_NAME) {}
 
@@ -110,12 +111,21 @@ export class CoyoteV2Device implements Device {
     const currentGeneration = () => channel === "A" ? this.waveformGenerationA : this.waveformGenerationB;
     const endAt = durationMs >= 9999 ? Number.POSITIVE_INFINITY : Date.now() + Math.max(100, durationMs);
     // V2 consumes each waveform frame for roughly 100 ms, so refresh until the deadline.
-    let frameIndex = 0;
+    let framePosition = 0;
     while (Date.now() < endAt && generation === currentGeneration()) {
-      const frame = frames[frameIndex % frames.length];
+      const frame = frames[Math.floor(framePosition) % frames.length];
       if (!frame) break;
-      await characteristic.writeAsync(encodeWaveFrame(...frame), true);
-      frameIndex += 1;
+      const modifier = this.modulations[channel];
+      const [x, y, z] = frame;
+      let outputFrame: V2Frame = frame;
+      if (modifier?.periodMs != null && x + y > 0) {
+        // V2 X+Y is a cycle period in milliseconds, not audio pitch in Hz.
+        const period = Math.round(Math.max(10, Math.min(1000, modifier.periodMs)));
+        const nextX = Math.max(1, Math.min(31, Math.round(Math.sqrt(period / 1000) * 15)));
+        outputFrame = [nextX, period - nextX, z];
+      }
+      await characteristic.writeAsync(encodeWaveFrame(...outputFrame), true);
+      framePosition += Math.max(0.1, Math.min(1, modifier?.speedFactor ?? 1));
       await sleep(100);
     }
     if (generation === currentGeneration() && this.peripheral?.state === "connected") {
@@ -123,7 +133,14 @@ export class CoyoteV2Device implements Device {
     }
   }
 
+  setWaveformModulation(channel: Channel, modulation: WaveformModulation | null): void {
+    if (modulation) this.modulations[channel] = { ...modulation };
+    else delete this.modulations[channel];
+  }
+
   async emergencyStop(): Promise<void> {
+    delete this.modulations.A;
+    delete this.modulations.B;
     this.waveformGenerationA += 1;
     this.waveformGenerationB += 1;
     if (this.strength && this.peripheral?.state === "connected") {

@@ -1,16 +1,34 @@
 import { Telegraf, Markup } from "telegraf";
-import { MockDevice } from "./device.js";
+import { MockDevice, type Channel } from "./device.js";
 import { CoyoteV2Device } from "./coyote-v2.js";
 import { ControlSession, type Action, type Mode } from "./control.js";
 import { callbackData, parseCallbackData } from "./bot-security.js";
 import { loadConfig } from "./config.js";
 import { createInviteCode, inviteCodeMatches, normalizeInviteCode } from "./session-access.js";
 import { startObsOverlay } from "./obs-overlay.js";
+import { AutoRampController } from "./auto-ramp.js";
+import { IOSBridgeServer, type IOSBridgeSnapshot } from "./ios-bridge.js";
+import { IOSRelayDevice } from "./ios-relay-device.js";
+import { SystemAudioReactiveController, AUDIO_FREQUENCY_RANGES, type AudioMode, type AudioTarget, type FrequencyRange } from "./audio-reactive.js";
 
 const config = loadConfig(process.env);
 const { token, ownerUserId, allowedChatId, strengthLimit, sessionDurationMs, voteWindowMs, actionWindowMs, actionsPerWindow, obsHost, obsPort } = config;
 const bot = new Telegraf(token);
-const device = config.deviceMode === "ble" ? new CoyoteV2Device() : new MockDevice();
+const iosToken = (process.env.IOS_BRIDGE_TOKEN ?? "").trim();
+const iosBridge: IOSBridgeServer | null = iosToken ? new IOSBridgeServer(iosToken, {
+  snapshot: iosSnapshot,
+  command: iosOwnerCommand,
+  hostDisconnected: () => {
+    iosRelayDevice?.onHostLost();
+    if (session?.snapshot().state === "active") {
+      void stopSession().catch((error: unknown) => console.error("iPhone host failure stop:", error));
+    }
+  },
+  botUsername: () => bot.botInfo?.username ?? "",
+}) : null;
+if (config.deviceMode === "ios" && !iosBridge) throw new Error("DG_DEVICE_MODE=ios requires IOS_BRIDGE_TOKEN");
+const iosRelayDevice: IOSRelayDevice | null = config.deviceMode === "ios" && iosBridge ? new IOSRelayDevice(iosBridge) : null;
+const device = config.deviceMode === "ble" ? new CoyoteV2Device() : iosRelayDevice ?? new MockDevice();
 
 let session: ControlSession | null = null;
 let inviteCode = "";
@@ -18,9 +36,13 @@ let boundGroupId: number | null = null;
 const inviteAuthorizedUsers = new Set<number>();
 let sharedPanel: { chatId: number; messageId: number } | null = null;
 let sharedPanelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-let autoRampTimer: ReturnType<typeof setInterval> | null = null;
-let autoRampStopTimer: ReturnType<typeof setTimeout> | null = null;
-let autoRampRateSeconds = 3;
+const autoRamp = new AutoRampController();
+const autoRampRates: Record<Channel, number> = { A: 3, B: 3 };
+const autoRampMaxIncrease: Record<Channel, number> = { A: 10, B: 10 };
+const AUTO_RAMP_RATE_OPTIONS = [1, 3, 5, 7, 11, 13, 17] as const;
+const audioReactive = new SystemAudioReactiveController(device);
+let audioTarget: AudioTarget = "both";
+let audioRange: FrequencyRange = AUDIO_FREQUENCY_RANGES[0]!;
 
 type ActionPoolPreset = "all" | "gentle" | "strength" | "waveform";
 const ACTION_POOL_ORDER: ActionPoolPreset[] = ["all", "gentle", "strength", "waveform"];
@@ -140,26 +162,21 @@ function drawRandomOperator(): OperatorEntry {
   return selected;
 }
 
-function stopAutoRamp(): void {
-  if (autoRampTimer) clearInterval(autoRampTimer);
-  if (autoRampStopTimer) clearTimeout(autoRampStopTimer);
-  autoRampTimer = null;
-  autoRampStopTimer = null;
+function stopAutoRamp(): void { autoRamp.stop(); }
+function stopAudioReactive(): void { audioReactive.stop(); }
+function toggleAudioReactive(mode: "volume" | "beat"): void {
+  if (!session || session.snapshot().state !== "active") throw new Error("请先手动启动并授权会话");
+  audioReactive.toggleMode(session, mode, audioTarget, audioRange, (message) => {
+    console.error(`音频采集故障: ${message}`);
+    // Loss of audio input is an error, not silence: stop the session and both ramp timers.
+    void stopSession().catch((error: unknown) => console.error("声控故障停止失败", error));
+  });
 }
 
-function startAutoRamp(): void {
+function startAutoRamp(channel: Channel): void {
   if (!session) throw new Error("请先创建并启动会话");
-  stopAutoRamp();
-  if (!session.isParticipant(ownerUserId)) session.addParticipant(ownerUserId, "管理员");
-  autoRampTimer = setInterval(() => {
-    if (!session || session.snapshot().state !== "active") { stopAutoRamp(); return; }
-    void session.applyOwnerAction({ type: "strength_delta", channel: "A", delta: 1 })
-      .then(() => session?.applyOwnerAction({ type: "strength_delta", channel: "B", delta: 1 }))
-      .catch(() => stopAutoRamp());
-  }, autoRampRateSeconds * 1000);
-  autoRampStopTimer = setTimeout(stopAutoRamp, 30_000);
-  autoRampTimer.unref?.();
-  autoRampStopTimer.unref?.();
+  if (!session.isParticipant(ownerUserId) && session.snapshot().state === "active") session.addParticipant(ownerUserId, "管理员");
+  autoRamp.start(session, channel, autoRampRates[channel], autoRampMaxIncrease[channel]);
 }
 
 function resetSessionRuntime(): void {
@@ -170,6 +187,7 @@ function resetSessionRuntime(): void {
   sharedPanel = null;
   actionPoolPreset = "all";
   stopAutoRamp();
+  stopAudioReactive();
   clearOperatorState();
 }
 
@@ -228,8 +246,27 @@ function panel(sessionId: string) {
     rows.push([Markup.button.callback("随机抽取操作员（管理员）", cb("operator_draw")), Markup.button.callback(`动作池：${poolText()}`, cb("pool_cycle"))]);
   }
   rows.push([Markup.button.callback("立即停止（管理员）", cb("stop"))]);
-  rows.push([Markup.button.callback(`自动提升30秒：${autoRampTimer ? "已开启" : "未开启"}`, cb("auto_ramp_toggle"))]);
-  rows.push([Markup.button.callback(`提升速率：每${autoRampRateSeconds}秒`, cb("auto_ramp_rate"))]);
+  for (const channel of ["A", "B"] as const) {
+    const name = channel.toLowerCase();
+    rows.push([Markup.button.callback(`${channel}通道自动提升：${autoRamp.isEnabled(channel) ? "已开启" : "未开启"}`, cb(`ramp_${name}_toggle`))]);
+    for (let offset = 0; offset < AUTO_RAMP_RATE_OPTIONS.length; offset += 4) {
+      rows.push(AUTO_RAMP_RATE_OPTIONS.slice(offset, offset + 4).map((rate) =>
+        Markup.button.callback(`${autoRampRates[channel] === rate ? "✓" : ""}${rate}秒`, cb(`ramp_${name}_${rate}`)),
+      ));
+    }
+  }
+  rows.push([
+    Markup.button.callback(`${audioReactive.isEnabled("volume") ? "✓" : ""}音量响应`, cb("audio_volume")),
+    Markup.button.callback(`${audioReactive.isEnabled("beat") ? "✓" : ""}节拍响应`, cb("audio_beat")),
+    Markup.button.callback("关闭声控", cb("audio_off")),
+  ]);
+  rows.push([Markup.button.callback(`声控通道：${audioTarget === "both" ? "A+B" : audioTarget}`, cb("audio_target"))]);
+  for (let offset = 0; offset < AUDIO_FREQUENCY_RANGES.length; offset += 4) {
+    rows.push(AUDIO_FREQUENCY_RANGES.slice(offset, offset + 4).map((range, index) => {
+      const label = range.minHz === range.maxHz ? `固定${range.minHz}Hz` : `${range.minHz}-${range.maxHz}Hz`;
+      return Markup.button.callback(`${audioRange.minHz === range.minHz && audioRange.maxHz === range.maxHz ? "✓" : ""}${label}`, cb(`audio_range_${offset + index}`));
+    }));
+  }
   return Markup.inlineKeyboard(rows);
 }
 
@@ -258,6 +295,7 @@ async function panelText(): Promise<string> {
     `状态：${stateText(status.state)}  模式：${modeText(status.mode)}`,
     `A：${status.currentA}/${status.limitA}  B：${status.currentB}/${status.limitB}`,
     `当前波形：A ${status.waveformA} / B ${status.waveformB}`,
+    `声控：${audioReactive.mode === "off" ? "关闭" : audioReactive.mode === "both" ? "音量+节拍" : audioReactive.mode === "volume" ? "音量响应（静音慢速）" : "节拍响应"} / 通道 ${audioTarget === "both" ? "A+B" : audioTarget} / ${audioRange.minHz === audioRange.maxHz ? `固定${audioRange.minHz}Hz` : `${audioRange.minHz}-${audioRange.maxHz}Hz`}`,
     ...(status.mode === "collaboration" ? ["管理员模式：操作立即生效"] : [
       `当前票数：${status.voteCounts.length ? status.voteCounts.map(voteText).join("，") : "暂无"}`,
       `本轮剩余：${roundRemaining}秒`,
@@ -329,10 +367,154 @@ function scheduleSharedPanelRefresh(): void {
 }
 
 async function stopSession(): Promise<void> {
-  await session?.stop();
   stopAutoRamp();
+  stopAudioReactive();
+  await session?.stop();
   clearOperatorState();
   scheduleSharedPanelRefresh();
+}
+
+/** Reuses existing Telegram ControlSession logic, rather than running another Telegram poller. */
+function iosSnapshot(): IOSBridgeSnapshot {
+  const state = session?.snapshot();
+  return {
+    active: state?.state === "active",
+    mode: state?.mode ?? "collaboration",
+    strengthA: state?.currentA ?? 0, strengthB: state?.currentB ?? 0,
+    waveformA: state?.waveformA ?? "波浪", waveformB: state?.waveformB ?? "波浪",
+    participants: state?.participants ?? 0, operators: state?.operators ?? [],
+    inviteCode, groupId: boundGroupId,
+    eventPool: actionPoolPreset,
+    expiresAt: state?.expiresAt ?? 0,
+    votes: Object.fromEntries((state?.voteCounts ?? []).map(v =>
+      [`${v.channel}:${v.action.type === "waveform" ? "waveform" : "strength"}:${JSON.stringify(v.action)}`, v.count])),
+    rampA: autoRamp.isEnabled("A"), rampB: autoRamp.isEnabled("B"),
+    rampDoneA: autoRamp.completed("A"), rampDoneB: autoRamp.completed("B"),
+    rampRateA: autoRampRates.A, rampRateB: autoRampRates.B,
+    rampMaxA: autoRampMaxIncrease.A, rampMaxB: autoRampMaxIncrease.B,
+  };
+}
+function relayAction(value: Record<string, unknown>): Action {
+  const channel = value.channel;
+  if (channel !== "A" && channel !== "B") throw new Error("Invalid channel");
+  if (value.type === "strength_delta") {
+    const delta = value.delta;
+    if (![-5,-3,-1,1,3,5].includes(Number(delta))) throw new Error("Invalid strength delta");
+    return { type: "strength_delta", channel, delta: Number(delta) as 1|3|5|-1|-3|-5 };
+  }
+  if (value.type === "waveform") {
+    const waveformId = String(value.waveformId ?? "");
+    if (!/^(?:imported_[0-5]|soft|rhythm|rise)$/.test(waveformId)) throw new Error("Unknown waveform");
+    return { type: "waveform", channel, waveformId, durationMs: 9999 };
+  }
+  throw new Error("Unsupported action");
+}
+async function iosOwnerCommand(name: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const active = () => {
+    if (!session || session.snapshot().state !== "active") throw new Error("No active session");
+    return session;
+  };
+  switch (name) {
+  case "status": return iosSnapshot() as unknown as Record<string, unknown>;
+  case "session.create": {
+    if (session?.snapshot().state === "active") throw new Error("Stop the current session before creating another");
+    const mode = payload.mode;
+    if (mode !== "collaboration" && mode !== "voting" && mode !== "event") throw new Error("Invalid mode");
+    createSession(mode, allowedChatId);
+    return { ...iosSnapshot(), message: "Session created; currently not armed" };
+  }
+  case "session.arm": {
+    if (!session || session.snapshot().state !== "draft") throw new Error("Create a draft first");
+    await session.arm(); // iPhone host always requires on-device physical approval first.
+    await initializeDefaultLevels();
+    return { ...iosSnapshot(), message: "Session authorized" };
+  }
+  case "session.stop": await stopSession(); return { ...iosSnapshot(), message: "Stopped and zeroed" };
+  case "session.disconnect": {
+    if (session) await stopSession();
+    await device.disconnect(); session = null; inviteCode = "";
+    return { ...iosSnapshot(), message: "Disconnected" };
+  }
+  case "owner.delta": {
+    const action = relayAction({ type: "strength_delta", ...payload });
+    await active().applyOwnerAction(action);
+    return iosSnapshot() as unknown as Record<string, unknown>;
+  }
+  case "owner.waveform": {
+    const action = relayAction({ type: "waveform", ...payload });
+    await active().applyOwnerAction(action);
+    return iosSnapshot() as unknown as Record<string, unknown>;
+  }
+  case "ramp.rate": {
+    const channel = payload.channel;
+    const rate = Number(payload.rateSeconds);
+    if (channel !== "A" && channel !== "B") throw new Error("Invalid channel");
+    AutoRampController.validateRate(rate);
+    autoRampRates[channel] = rate;
+    autoRamp.updateRate(channel, rate);
+    return { ...iosSnapshot(), message: `${channel} interval: ${rate}s` };
+  }
+  case "ramp.maxIncrease": {
+    const channel = payload.channel;
+    const maximum = Number(payload.maxIncrease);
+    if (channel !== "A" && channel !== "B") throw new Error("Invalid channel");
+    AutoRampController.validateMaximum(maximum);
+    autoRampMaxIncrease[channel] = maximum;
+    autoRamp.updateMaximum(channel, maximum);
+    return { ...iosSnapshot(), message: `${channel} ramp stops after +${maximum}` };
+  }
+  case "ramp.toggle": {
+    const channel = payload.channel;
+    if (channel !== "A" && channel !== "B") throw new Error("Invalid channel");
+    if (autoRamp.isEnabled(channel)) autoRamp.stop(channel);
+    else { active(); startAutoRamp(channel); }
+    return { ...iosSnapshot(), message: `${channel} ramp ${autoRamp.isEnabled(channel) ? "ON" : "OFF"}` };
+  }
+  case "audio.volume": active(); toggleAudioReactive("volume"); return { ...iosSnapshot(), message: "Audio volume toggled" };
+  case "audio.beat": active(); toggleAudioReactive("beat"); return { ...iosSnapshot(), message: "Audio beat toggled" };
+  case "audio.range": {
+    const minHz = Number(payload.minHz), maxHz = Number(payload.maxHz);
+    if (!Number.isInteger(minHz) || !Number.isInteger(maxHz) || minHz < 1 || maxHz > 100 || minHz > maxHz) throw new Error("Invalid frequency range");
+    audioRange = { minHz, maxHz }; audioReactive.updateSettings(audioTarget, audioRange);
+    return { ...iosSnapshot(), message: `Audio frequency ${minHz}-${maxHz}Hz` };
+  }
+  case "session.invite": return { ...iosSnapshot(), message: await inviteText() };
+  case "session.join": {
+    const s = active();
+    if (!s.isParticipant(ownerUserId)) s.addParticipant(ownerUserId, "iOS 管理员");
+    return { ...iosSnapshot(), message: "Joined" };
+  }
+  case "group.bind": {
+    const id = Number(payload.groupId);
+    if (!Number.isSafeInteger(id) || id >= 0) throw new Error("Invalid group id");
+    boundGroupId = id; active().config.chatId = id;
+    await publishGroupPanel(id);
+    return { ...iosSnapshot(), message: "Group linked" };
+  }
+  case "vote.submit": {
+    const s = active(); const action = relayAction(payload);
+    if (!s.isParticipant(ownerUserId)) s.addParticipant(ownerUserId, "iOS 管理员");
+    const result = await s.submit(ownerUserId, action);
+    return { ...iosSnapshot(), message: `Votes: ${result.votes}` };
+  }
+  case "event.queue": {
+    if (active().snapshot().mode !== "event") throw new Error("Not in event mode");
+    const position = enqueueTemporaryOperator({ userId: ownerUserId, displayName: "iPhone 管理员" });
+    return { ...iosSnapshot(), message: `Queue position ${position}` };
+  }
+  case "event.queue.leave": removeFromOperatorQueue(ownerUserId); return { ...iosSnapshot(), message: "Left queue" };
+  case "event.random": {
+    if (active().snapshot().mode !== "event") throw new Error("Not in event mode");
+    const picked = drawRandomOperator(); return { ...iosSnapshot(), message: `Operator ${picked.displayName}` };
+  }
+  case "event.pool": {
+    const preset = payload.preset;
+    if (preset !== "all" && preset !== "gentle" && preset !== "strength" && preset !== "waveform") throw new Error("Invalid pool");
+    actionPoolPreset = preset;
+    return { ...iosSnapshot(), message: `Action pool ${preset}` };
+  }
+  default: throw new Error("Unsupported iOS bridge command");
+  }
 }
 
 const obsServer = startObsOverlay(obsHost, obsPort, () => {
@@ -380,6 +562,8 @@ bot.command("help", async (ctx) => {
     "/status         查看设备和会话状态",
     "/bindgroup 邀请码  管理员在群内绑定会话",
     "/invite         管理员查看多人邀请码",
+    "/audiofreq 5 20  设置节拍响应频率范围（1–100Hz）",
+    "声控需要 macOS 系统音频录制权限；静音低速播放，捕获故障会结束会话。",
     "活动模式每五秒结算 A/B 强度和 A/B 波形四类结果。",
   ].join("\n"), isOwner(ctx.from.id) ? adminMenu() : undefined);
 });
@@ -444,6 +628,19 @@ bot.command("queue", async (ctx) => {
     const position = enqueueTemporaryOperator({ userId: ctx.from.id, displayName: displayName(ctx.from) });
     await ctx.reply(position === 0 ? "你已获得10秒临时操作权。" : `已加入操作队列，当前排位：${position}。`);
   } catch (error) { await ctx.reply(errorText(error)); }
+});
+
+bot.command("audiofreq", async (ctx) => {
+  if (!inAllowedChat(ctx.chat.id, ctx.chat.type) || !isOwner(ctx.from.id)) return;
+  const args = commandArgument(ctx.message.text).split(/\s+/).map(Number);
+  const [minHz, maxHz] = args;
+  if (args.length !== 2 || minHz === undefined || maxHz === undefined ||
+      !Number.isInteger(minHz) || !Number.isInteger(maxHz) || minHz < 1 || maxHz > 100 || minHz > maxHz) {
+    await ctx.reply("请使用 /audiofreq 最低Hz 最高Hz（整数，1 ≤ 最低 ≤ 最高 ≤ 100；相同则为固定频率）"); return;
+  }
+  audioRange = { minHz, maxHz };
+  audioReactive.updateSettings(audioTarget, audioRange);
+  await ctx.reply(`声控波形周期频率已设为 ${minHz === maxHz ? `固定 ${minHz} Hz` : `${minHz}-${maxHz} Hz`}（不改变电流强度）`);
 });
 
 bot.command("panel", async (ctx) => {
@@ -557,10 +754,33 @@ bot.on("callback_query", async (ctx) => {
       if (!isOwner(ctx.from.id)) throw new Error("只有管理员可以设置动作池");
       actionPoolPreset = ACTION_POOL_ORDER[(ACTION_POOL_ORDER.indexOf(actionPoolPreset) + 1) % ACTION_POOL_ORDER.length] ?? "all";
       await answer(`动作池已切换为：${poolText()}`);
-    } else if (code === "auto_ramp_toggle" || code === "auto_ramp_rate") {
+    } else if (["audio_volume", "audio_beat", "audio_off", "audio_target"].includes(code) || /^audio_range_[0-7]$/.test(code)) {
+      if (!isOwner(ctx.from.id)) throw new Error("只有管理员可以控制系统音频响应");
+      if (code === "audio_off") stopAudioReactive();
+      else if (code === "audio_volume" || code === "audio_beat") {
+        const newMode = code === "audio_volume" ? "volume" : "beat";
+        toggleAudioReactive(newMode);
+      } else if (code === "audio_target") {
+        audioTarget = audioTarget === "both" ? "A" : audioTarget === "A" ? "B" : "both";
+        audioReactive.updateSettings(audioTarget, audioRange);
+      } else {
+        const rangeIndex = Number(code.split("_")[2]);
+        audioRange = AUDIO_FREQUENCY_RANGES[rangeIndex] ?? audioRange;
+        audioReactive.updateSettings(audioTarget, audioRange);
+      }
+      await answer(audioReactive.mode === "off" ? "声控已关闭" : `声控：${audioReactive.mode === "both" ? "音量+节拍" : audioReactive.mode === "volume" ? "音量响应" : "节拍响应"}；可与 A/B 自动提升一起使用`);
+    } else if (/^ramp_[ab]_(?:toggle|1|3|5|7|11|13|17)$/.test(code)) {
       if (!isOwner(ctx.from.id)) throw new Error("只有管理员可以使用自动提升");
-      if (code === "auto_ramp_toggle") { if (autoRampTimer) stopAutoRamp(); else startAutoRamp(); }
-      else { const rates = [3, 5, 7, 11, 13]; autoRampRateSeconds = rates[(rates.indexOf(autoRampRateSeconds) + 1) % rates.length] ?? 3; }
+      const channel: Channel = code.startsWith("ramp_a_") ? "A" : "B";
+      if (code.endsWith("_toggle")) {
+        if (autoRamp.isEnabled(channel)) autoRamp.stop(channel);
+        else startAutoRamp(channel);
+      } else {
+        const rate = Number(code.split("_")[2]);
+        if (!AUTO_RAMP_RATE_OPTIONS.some((candidate) => candidate === rate)) throw new Error("提升频率无效");
+        autoRampRates[channel] = rate;
+        autoRamp.updateRate(channel, rate);
+      }
       await answer();
     } else {
       const action = actions[code];
@@ -587,7 +807,14 @@ bot.on("callback_query", async (ctx) => {
 
 bot.catch((error) => { console.error("Telegram handler error", error); });
 
-bot.launch().then(async () => {
+if (iosBridge) {
+  const host = (process.env.IOS_BRIDGE_HOST ?? "127.0.0.1").trim();
+  const port = Number(process.env.IOS_BRIDGE_PORT ?? "8788");
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid iOS bridge port");
+  iosBridge.listen(host, port);
+}
+
+bot.launch({ dropPendingUpdates: true }).then(async () => {
   await bot.telegram.setMyCommands([
     { command: "start", description: "打开控制面板或使用邀请码加入" },
     { command: "help", description: "查看中文操作说明" },
@@ -595,6 +822,7 @@ bot.launch().then(async () => {
     { command: "queue", description: "加入10秒临时操作队列" },
     { command: "status", description: "查看设备和会话状态" },
     { command: "panel", description: "打开当前控制面板" },
+    { command: "audiofreq", description: "管理员：设置声控波形频率范围" },
     { command: "bindgroup", description: "管理员：绑定当前群聊" },
     { command: "invite", description: "管理员：查看多人邀请码" },
     { command: "connect", description: "管理员：连接 DG-LAB 设备" },
@@ -604,14 +832,17 @@ bot.launch().then(async () => {
     { command: "disarm", description: "管理员：撤销并归零" },
     { command: "disconnect", description: "管理员：停止并断开设备" },
   ]);
-  console.log(`DG-LAB Telegram bot started in ${config.deviceMode === "ble" ? "BLE" : "MOCK"} mode`);
+  console.log(`DG-LAB Telegram bot started in ${config.deviceMode === "ble" ? "BLE" : config.deviceMode === "ios" ? "iOS relay" : "MOCK"} mode`);
   console.log(`OBS overlay: http://${obsHost}:${obsPort}/obs`);
 });
 
 async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
+  stopAudioReactive();
+  stopAutoRamp();
   await session?.stop().catch(() => undefined);
   await device.disconnect().catch(() => undefined);
   obsServer.close();
+  iosBridge?.close();
   bot.stop(signal);
 }
 
