@@ -1,7 +1,6 @@
 import AppKit
 import Combine
 import Foundation
-import Security
 
 // Single integrated macOS app: the native UI owns an embedded Node engine.
 // Both share the exact existing ControlSession, but no LaunchAgent is required.
@@ -57,43 +56,21 @@ private struct StatusEnvelope: Decodable {
     let state: ConsoleSnapshot
 }
 
-enum ConsoleKeychain {
-    static let appService = "com.shzxm.dglab-macos-console.token"
-    static let existingBridgeService = "dglab-ios-bridge"
-    static let botService = "com.shzxm.dglab-macos-console.bot-token"
-    static let legacyBotService = "dglab-telegram-bot"
-
-    static func load(service: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-    static func save(_ secret: String, service: String = appService) -> Bool {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                    kSecAttrService as String: service,
-                                    kSecAttrAccount as String: "local-admin"]
-        SecItemDelete(query as CFDictionary)
-        var payload = query
-        payload[kSecValueData as String] = Data(secret.utf8)
-        payload[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        return SecItemAdd(payload as CFDictionary, nil) == errSecSuccess
-    }
-}
-
 @MainActor
 final class ConsoleModel: ObservableObject {
     @Published private(set) var snapshot: ConsoleSnapshot?
     @Published private(set) var connected = false
     @Published private(set) var lastMessage = ""
     @Published private(set) var log: [String] = []
-    @Published var errorMessage = ""
+    @Published var errorMessage = "" {
+        didSet {
+            let clean = AppDiagnostics.shared.redact(errorMessage)
+            if clean != errorMessage { errorMessage = clean }
+            if !clean.isEmpty && clean != oldValue {
+                AppDiagnostics.shared.append(clean, category: "ERROR")
+            }
+        }
+    }
     @Published private(set) var isWorking = false
     @Published private(set) var deviceConnecting = false
     @Published var isQuitting = false
@@ -145,31 +122,39 @@ final class ConsoleModel: ObservableObject {
 
     func prepare() {
         if secret.isEmpty {
-            secret = ConsoleKeychain.load(service: ConsoleKeychain.appService)
-                ?? ConsoleKeychain.load(service: ConsoleKeychain.existingBridgeService) ?? ""
-            if secret.isEmpty {
-                var entropy = [UInt8](repeating: 0, count: 32)
-                if SecRandomCopyBytes(kSecRandomDefault, entropy.count, &entropy) == errSecSuccess {
-                    let random = entropy.map { String(format: "%02x", $0) }.joined()
-                    if ConsoleKeychain.save(random) { secret = random }
-                }
+            do {
+                // Private App Support file; never touch Keychain on startup.
+                secret = try AppPrivateStorage.createAPITokenIfMissing()
+                keyPresent = !secret.isEmpty
+            } catch {
+                errorMessage = "无法在 App 私有目录保存 API 密钥：\(error.localizedDescription)"
             }
-            keyPresent = !secret.isEmpty
         }
         botTokenPresent = telegramSecret() != nil
+        AppDiagnostics.shared.append("App launched; embedded engine starts only on explicit request", category: "APP")
         Task { await refresh() }
         Task { await refreshServiceStatus() }
     }
 
     func saveKey() {
+        // Never change the key while the embedded engine expects the old
+        // Bearer token, or safe stop/disconnect would become impossible.
+        guard !embeddedEngine.running else {
+            errorMessage = "请先安全停止内置引擎，再修改 API 密钥。"
+            return
+        }
         let cleaned = enteredKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleaned.count >= 32 else { errorMessage = "桥接密钥至少需要 32 个字符"; return }
-        guard ConsoleKeychain.save(cleaned) else { errorMessage = "无法保存到 macOS 钥匙串"; return }
-        secret = cleaned
-        keyPresent = true
-        enteredKey = ""
-        note("密钥已保存到本机钥匙串")
-        Task { await refresh() }
+        guard cleaned.utf8.count >= 32 else { errorMessage = "桥接密钥至少需要 32 字节"; return }
+        do {
+            try AppPrivateStorage.saveAPI(cleaned)
+            secret = cleaned
+            keyPresent = true
+            enteredKey = ""
+            note("API 密钥已保存到 App 私有目录（不会访问钥匙串）")
+            Task { await refresh() }
+        } catch {
+            errorMessage = "本地保存失败：\(error.localizedDescription)"
+        }
     }
 
     private func request(path: String, method: String = "GET", body: [String: Any]? = nil,
@@ -268,28 +253,39 @@ final class ConsoleModel: ObservableObject {
         }
     }
     func emergencyStop() { command("session.stop") }
-    private func note(_ message: String) {
-        lastMessage = message
-        log.insert("\(Date.now.formatted(date: .omitted, time: .standard))  \(message)", at: 0)
-        if log.count > 40 { log.removeLast(log.count - 40) }
+    private func note(_ message: String, category: String = "APP") {
+        let safe = AppDiagnostics.shared.redact(message)
+        lastMessage = safe
+        log.insert("\(Date.now.formatted(date: .omitted, time: .standard))  \(safe)", at: 0)
+        if log.count > 80 { log.removeLast(log.count - 80) }
+        AppDiagnostics.shared.append(safe, category: category)
     }
 
     func bridgeSecret() -> String { secret }
-    func telegramSecret() -> String? {
-        ConsoleKeychain.load(service: ConsoleKeychain.botService)
-            ?? ConsoleKeychain.load(service: ConsoleKeychain.legacyBotService)
-    }
+    func telegramSecret() -> String? { AppPrivateStorage.telegramToken() }
     func saveBotToken() {
         let value = enteredBotToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.range(of: #"^\d{6,15}:[A-Za-z0-9_-]{20,}$"#, options: .regularExpression) != nil else {
             errorMessage = "Telegram Bot Token 格式错误"; return
         }
-        guard ConsoleKeychain.save(value, service: ConsoleKeychain.botService) else {
-            errorMessage = "保存 Bot Token 到钥匙串失败"; return
+        do {
+            try AppPrivateStorage.saveTelegram(value)
+            enteredBotToken = ""
+            botTokenPresent = true
+            note("Telegram 凭证已保存到 App 私有目录")
+        } catch {
+            errorMessage = "Telegram 凭证保存失败：\(error.localizedDescription)"
         }
-        enteredBotToken = ""
-        botTokenPresent = true
-        note("Telegram 凭证已安全保存")
+    }
+
+    func exportDiagnosticLogs() {
+        do {
+            if let file = try AppDiagnostics.shared.exportToUserChosenFile() {
+                note("诊断日志已导出：\(file.lastPathComponent)")
+            }
+        } catch {
+            errorMessage = "日志导出失败：\(error.localizedDescription)"
+        }
     }
     func importLegacyConfiguration() {
         // Only extract non-secret configuration keys, never copy a private plist
@@ -303,12 +299,12 @@ final class ConsoleModel: ObservableObject {
             // NEVER import the previous deviceMode automatically: first-run mock.
         }
         botTokenPresent = telegramSecret() != nil
-        note("已读取旧配置的非敏感字段；设备模式保持当前选择")
+        note("只读取旧设置中的非敏感字段；不会触碰旧钥匙串。API/Telegram 密钥需要手动重新输入。")
     }
     func appendEngineMessage(_ message: String) {
         for line in message.split(separator: "\n").prefix(8) {
             let value = String(line).prefix(250)
-            note(String(value))
+            note(String(value), category: "ENGINE")
         }
     }
     func refreshServiceStatus() async {

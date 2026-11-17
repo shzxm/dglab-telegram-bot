@@ -519,9 +519,12 @@ private struct APIPage: View {
                 }
                 HStack {
                     SecureField("输入桥接密钥（不显示）", text: $model.enteredKey)
-                    Button("保存到钥匙串") { model.saveKey() }
+                    Button("保存到 App 本地") { model.saveKey() }
+                        .disabled(model.embeddedEngine.running)
                 }
-                Label(model.keyPresent ? "已配置本地 API 凭证" : "尚未取得本地 API 凭证", systemImage: model.keyPresent ? "lock.shield" : "lock.open")
+                Text("修改 API 密钥前须安全停止内置引擎，否则运行中的服务仍会使用旧密钥。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Label(model.keyPresent ? "已保存 App 本地 API 密钥（无钥匙串弹窗）" : "尚未生成本地 API 密钥", systemImage: model.keyPresent ? "lock.shield" : "lock.open")
                     .foregroundStyle(model.keyPresent ? .green : .orange)
                 HStack {
                     Text("GET /health · GET /v1/status · GET /v1/capabilities · POST /v1/command")
@@ -559,8 +562,17 @@ private struct APIPage: View {
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(10)
         }
-        GroupBox("最近操作") {
-            VStack(alignment: .leading, spacing: 6) {
+        GroupBox("诊断日志与导出") {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Text("App 操作、内置引擎输出及错误会保留为本机脱敏日志")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("导出诊断日志…") { model.exportDiagnosticLogs() }
+                        .buttonStyle(.borderedProminent)
+                }
+                Text("最多保留 3 份各约 2MB 的日志，导出前自动隐藏 API/Telegram Token。共享前建议再检查文本。")
+                    .font(.caption).foregroundStyle(.secondary)
                 ForEach(Array(model.log.prefix(10)), id: \.self) { line in
                     Text(line).font(.caption.monospaced()).textSelection(.enabled)
                 }

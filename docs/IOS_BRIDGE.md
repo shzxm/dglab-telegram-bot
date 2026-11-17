@@ -55,3 +55,8 @@
 ## macOS 原生 GUI / REST API 的区别
 
 macOS 本机另有 [DG-LAB Console](../macos/DGLabConsole/README.md)，使用 **127.0.0.1:8789** 的 HTTP Bearer API（[REST 文档](LOCAL_CONTROL_API.md)），不会对外开放该端口。iOS App 则继续使用本项目独立的 WebSocket 桥接端口（默认 8788）。**两套接口都使用同一份高熵桥接密钥和同一个 ControlSession，但协议和默认监听地址不同**；不会启动两个 Telegram Bot 实例。
+
+
+## macOS App 1.2.0 本地凭证保存
+
+对于新 macOS 独立 App，`IOS_BRIDGE_TOKEN` 由 App 自动生成并保存在用户的 `~/Library/Application Support/DG-LAB Console/credentials.json`，不再读取 macOS Keychain。老版本 App、直接运行的 Node 命令行控制器可以继续使用既有启动方式。**iOS 客户端的 Keychain 凭证存储没有改变**；首次从旧 macOS App 升级到 1.2.0 时，需要手动更新客户端的桥接密钥，或者在新 Mac App 中重新输入旧密钥。不能在内置控制引擎运行期间修改 API 密钥。

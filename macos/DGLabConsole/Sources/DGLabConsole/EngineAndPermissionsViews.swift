@@ -56,16 +56,16 @@ struct EnginePage: View {
                         .textFieldStyle(.roundedBorder)
                 }.disabled(model.embeddedEngine.running)
                 HStack {
-                    Button("读取旧版非敏感设置与凭证") { model.importLegacyConfiguration() }
+                    Button("仅导入旧版非敏感设置") { model.importLegacyConfiguration() }
                     Text(model.botTokenPresent ? "Telegram 凭证可用（不显示）" : "Telegram Token 尚未配置")
                         .font(.caption).foregroundStyle(model.botTokenPresent ? .green : .secondary)
                     Spacer()
                 }
                 HStack {
                     SecureField("粘贴自己的 BotFather Token", text: $model.enteredBotToken)
-                    Button("安全保存到钥匙串") { model.saveBotToken() }
+                    Button("保存到 App 本地") { model.saveBotToken() }
                 }
-                Text("Bot Token 不会写入安装包、日志、仓库或配置 JSON。首次启用 Telegram 前，请确认账号和管理员 ID。")
+                Text("API 与 Telegram 凭证仅存于 App 的私有本地文件（0600），不访问 macOS 钥匙串。首次迁移旧版需手动填写原有密钥，避免触发钥匙串权限。")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(10)
         }
@@ -79,7 +79,7 @@ struct EnginePage: View {
                 }
                 Text("本机 REST API：127.0.0.1:\(model.apiPort)。iPhone WebSocket：\(model.bridgeHost):8788。仅在可信局域网可把桥接地址改为 Mac 的内网 IP，不得直接向公网暴露。")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("桥接密钥在 App 钥匙串保存，iOS 客户端输入同一密钥。")
+                Text("桥接密钥保存在 App 的本地私有目录。升级后首次会生成新密钥，已有 iOS 客户端需同步更新，或手动填入原有桥接密钥。")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(10)
         }

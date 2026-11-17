@@ -56,7 +56,7 @@ flowchart TD
 - **权限中心**：蓝牙、麦克风、屏幕录制、系统音频实际短时测试、通知、局域网设置、文件选择、可选辅助功能各有独立按钮；不能绕过 macOS 已拒绝的 TCC 授权。
 - **完整控制**：设备与会话、A/B 强度/波形、1–60 秒自动提升间隔与累计 +1–33、音量与节拍、Telegram 多人/直播/投票、OBS、本地 API、iOS 桥接。
 - **无重复轮询**：旧 LaunchAgent 应保持卸载。只有内置引擎持有 Telegram Bot Token 和蓝牙控制权。真正停止前确认会话 inactive 且 A/B 已归零。
-- **本地 API**：`http://127.0.0.1:8789`，独立 Keychain Bearer 密钥鉴权、命令白名单、连接/授权二次确认；参阅 [docs/LOCAL_CONTROL_API.md](docs/LOCAL_CONTROL_API.md)。
+- **本地 API**：`http://127.0.0.1:8789`，独立 Bearer 密钥鉴权（macOS App 使用私有本地文件）、命令白名单、连接/授权二次确认；参阅 [docs/LOCAL_CONTROL_API.md](docs/LOCAL_CONTROL_API.md)。
 
 注意：这属于**SwiftUI App + 应用内嵌的 Node.js 控制引擎**，并非把每一行原来的 TypeScript 重写成 Swift。正式 App 无额外 Node 运行环境依赖，但真实 BLE 连接与系统音频 TCC 权限仍需要用户现场授权及实体设备验收。
 
@@ -240,3 +240,7 @@ launchd/                    macOS 服务模板
 ### macOS Console v1.1.1 更新
 
 改进独立 App 的 1 秒状态刷新、设备连接超时与未连接提示、A/B 独立投票卡片、录屏授权系统设置入口及局域网说明，移除无实际使用场景的文件访问演示按钮。**关闭 App 不再直接中断 Node**：先等待设备停止/断开与状态验证，再结束引擎；失败时取消退出并显示错误。详细行为见 [macOS Console README](macos/DGLabConsole/README.md)。
+
+### macOS Console v1.2.0：本地密钥与诊断日志
+
+API 桥接密钥、Telegram 凭证改为 **App 专属 Application Support 本地文件**（`0700/0600`），不再访问 macOS Keychain，因此不触发钥匙串授权。原有钥匙串密钥不会自动迁移，首次需要重新同步 iOS 桥接密钥、Telegram Token。新增持久化、脱敏、限大小的 App/Node 日志以及「本地 API → 导出诊断日志」按钮，可选择文件路径导出 `.txt`，方便排错。详见 [App README](macos/DGLabConsole/README.md)。

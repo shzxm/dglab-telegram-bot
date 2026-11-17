@@ -8,7 +8,7 @@ App **不依赖** Homebrew Node.js、单独的 `com.dglab.telegram-bot` LaunchAg
 
 1. 打开 `DG-LAB Console.app`，进入「**权限中心**」。根据需要逐项点击蓝牙、屏幕录制、系统音频测试、麦克风和通知权限；已拒绝的权限需前往系统设置修改。系统音频测试仅短时捕获，不保存音频或屏幕。
 2. 进入「**内置引擎**」。设备默认 `mock`（不接触硬件）；可选择 `ble`（Mac 蓝牙）或 `ios`（iPhone 蓝牙主机），但必须在现场确认设备和硬件急停方式后切换。
-3. 若需要 Telegram，开启 Telegram 选项，填写 BotFather Token、管理员数字 ID 或点击「读取旧版非敏感设置与凭证」。Token 单独保存在 Keychain 中，不进入安装包。
+3. 若需要 Telegram，开启 Telegram 选项，填写 BotFather Token、管理员数字 ID 或点击「仅导入旧版非敏感设置」。Token 手动保存到 App 私有目录，不访问 macOS Keychain，也不进入安装包。
 4. 点击 **启动 App 内置引擎**，待页面显示 API 已连接；然后在总览、A/B 通道、声控、Telegram 和 API 页面使用功能。关闭 GUI 窗口不会启动额外 Bot，退出 App 前必须先停止活动输出。
 
 ## 功能
@@ -67,3 +67,15 @@ iOS App [dglab-ios](https://github.com/shzxm/dglab-ios) 可选择完全独立蓝
 **注意**：应用内的数值归零不等于在网络/蓝牙失联后实体设备一定执行了归零，仍必须准备独立硬件停止方式。
 
 - 系统音频权限测试助手现在归 App 生命周期管理，正常退出时会主动终止此独立测试进程。授权界面由 macOS TCC 决定，应用不能代替用户点击批准。
+
+## v1.2.0：App 私有密钥和日志导出
+
+- **不再调用 macOS 钥匙串**。API / iOS 桥接密钥与 Telegram Bot Token 持久化于 `~/Library/Application Support/DG-LAB Console/credentials.json`；目录 `0700`，文件 `0600`，用临时文件和原子替换写入。
+- 这个存储位置**不是 `.app` 安装包**，替换或升级应用不会擦除已有密钥，也不会将用户密钥发布到 GitHub。不同于 Keychain，文件使用权限隔离而不是钥匙串加密，同一账户下有文件权限的程序可以读取，请自行保护本机账户。
+- **首次迁移**：为避免钥匙串弹窗，不自动读取此前的 Keychain 项目。第一次打开新版会生成新的独立桥接密钥；需要继续连接已配置旧密钥的 iOS App 时，应手动同步新密钥，或在新版「本地 API」页面手动填入与 iOS 相同的原密钥。Telegram Bot Token 同样需手动重新填入一次。修改密钥后应重启已启动的内置引擎，使双方使用相同配置。
+- **日志**：App 交互记录、内置 Node stdout/stderr 及错误信息脱敏保存在 `~/Library/Application Support/DG-LAB Console/Logs/`。轮转保留 `dg-lab.log` 与最多 3 份历史文件，每份约 2MB；文件权限 `0600`，目录 `0700`。
+- **导出**：在「本地 API → 诊断日志与导出」点击「导出诊断日志…」，使用系统保存对话框选择文件。导出带 ISO8601 时间戳、日志来源、App/macOS 版本信息，自动遮盖 `Bearer`、Telegram Token、当前已知密钥等；**导出是可共享的普通文本文件，不会加密**，分享前请人工检查。
+- 不再依赖用户手动复制控制台最近 10 行；导出包含持续日志和轮转记录。为避免巨量磁盘占用，只保留有界历史。
+- 可在安装完整 Xcode 的 Mac 上运行 `./macos/DGLabConsole/Scripts/test-private-storage.sh` 验证持久化、`0700/0600` 权限和日志脱敏。测试使用隔离的 `/tmp` 目录，不触碰真实配置。
+
+- **安全限制**：内置 Node 引擎运行时禁止直接修改 API 密钥，因为新旧 Bearer 不一致会导致 App 无法向旧引擎发送安全停止命令。请先安全停止内置引擎，再修改并重新启动。

@@ -6,14 +6,14 @@
 
 服务在配置了 `IOS_BRIDGE_TOKEN`（至少 32 字符）后启用，默认绑定 **`127.0.0.1:8789`**。可通过 `DG_LOCAL_API_PORT` 修改端口，但不支持绑定到 LAN 或公网地址。
 
-所有 `/v1/*` 路由必须提供 `Authorization: Bearer <IOS_BRIDGE_TOKEN>`。跨源浏览器 Origin 请求被拒绝；HTTP POST 还要求 `Content-Type: application/json`、最大 16 KiB，请求每秒限速 6 条，`session.stop` / `session.disconnect` 不受此普通限速。密钥属于**管理员权限**，不要交给 Telegram 投票成员。输入密钥应来自本地环境/Keychain，不要写在公开代码或仓库文档。
+所有 `/v1/*` 路由必须提供 `Authorization: Bearer <IOS_BRIDGE_TOKEN>`。跨源浏览器 Origin 请求被拒绝；HTTP POST 还要求 `Content-Type: application/json`、最大 16 KiB，请求每秒限速 6 条，`session.stop` / `session.disconnect` 不受此普通限速。密钥属于**管理员权限**，不要交给 Telegram 投票成员。独立 macOS App 的密钥应来自用户私有的 `~/Library/Application Support/DG-LAB Console/credentials.json`（`0600`），不能写在公开代码或仓库文档。旧版命令行 Bot 的 Keychain 配置不受此更改影响。
 
 ## 示例
 
-以下命令先读取 macOS Keychain 中由本机管理员创建的桥接密钥。**请注意 Shell 环境变量可能被同一用户其他进程读取，不要截图或向外分享。**
+以下示例从 macOS App 1.2.0 的私有本地凭证文件中读取桥接密钥，不再访问 Keychain。**请注意 Shell 环境变量可能被同一用户其他进程读取，不要截图或向外分享。**
 
 ```bash
-export IOS_BRIDGE_TOKEN="$(security find-generic-password -s dglab-ios-bridge -w)"
+export IOS_BRIDGE_TOKEN="$(python3 -c 'import json,pathlib; p=pathlib.Path.home()/"Library/Application Support/DG-LAB Console/credentials.json"; print(json.loads(p.read_text())["apiToken"])')"
 
 # 读取已授权状态，不启动设备
 curl -fsS -H "Authorization: Bearer $IOS_BRIDGE_TOKEN" \
