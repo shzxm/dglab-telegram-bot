@@ -255,8 +255,11 @@ final class ConsoleModel: ObservableObject {
     func emergencyStop() { command("session.stop") }
     private func note(_ message: String, category: String = "APP") {
         let safe = AppDiagnostics.shared.redact(message)
-        lastMessage = safe
-        log.insert("\(Date.now.formatted(date: .omitted, time: .standard))  \(safe)", at: 0)
+        // On-screen history remains compact; persistent diagnostic logs keep
+        // much more of each (redacted) engine error/stack trace.
+        let summary = String(safe.prefix(250))
+        lastMessage = summary
+        log.insert("\(Date.now.formatted(date: .omitted, time: .standard))  \(summary)", at: 0)
         if log.count > 80 { log.removeLast(log.count - 80) }
         AppDiagnostics.shared.append(safe, category: category)
     }
@@ -303,8 +306,7 @@ final class ConsoleModel: ObservableObject {
     }
     func appendEngineMessage(_ message: String) {
         for line in message.split(separator: "\n").prefix(8) {
-            let value = String(line).prefix(250)
-            note(String(value), category: "ENGINE")
+            note(String(line), category: "ENGINE")
         }
     }
     func refreshServiceStatus() async {
