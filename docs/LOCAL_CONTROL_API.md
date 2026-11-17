@@ -56,3 +56,10 @@ curl -fsS -X POST http://127.0.0.1:8789/v1/command \
 返回 JSON：成功 `{"ok":true,"state":{...}}`，失败 `{"ok":false,"error":"..."}`。控制错误多为 HTTP `409`；无密钥 `401`；缺乏启动/连接确认 `403`；请求过频 `429`。
 
 系统不提供任意 Bash / shell / 文件管理命令。停止 API 成功不等于物理设备一定已断电；当 BLE 断连时必须有外部硬件停止手段。
+
+
+## 自包含 Mac App 的默认行为
+
+安装 `DG-LAB Console.app` v1.1.0 后，点击「启动内置引擎」才会在 App 内启动 API 服务。无需先运行 `launchctl` 或另行启动旧 Bot。内置引擎可只在 `DG_DESKTOP_OFFLINE=1`（App 的「关闭 Telegram」选项）及 `mock` 模式运行，供首次权限检查和 UI 测试。
+
+引擎运行时 API 与 Telegram、iOS Bridge 共享一份 ControlSession，但**只有该 App 自己启动的一份 Node 子进程**负责设备。App 的「安全停止」会重新回读真实状态，只有会话、设备 A/B 均确认零输出时才请求子进程 SIGINT 停机。`/health` 不等于真实设备安全确认。

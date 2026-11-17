@@ -60,3 +60,16 @@ flowchart LR
 ```
 
 本地 API 仅绑定 loopback；未经认证无法查询会话状态或修改设备。修改会话授权和连接设备需要明确确认请求头，停止会话不受普通 API 限速。详情见 [LOCAL_CONTROL_API.md](LOCAL_CONTROL_API.md)。
+
+
+## macOS 自包含 App v1.1.0
+
+从 2026-11-17 起，SwiftUI 控制台升级为独立运行应用：`DG-LAB Console.app` 自带 ARM64 Node 24.13.0、完整 Bot 生产依赖、波形/声音/Telegram 逻辑及内置 ScreenCaptureKit helper。它不借用 Mac 已安装的 Node，也不要求旧 LaunchAgent 运行。**GUI 进程管理自己 bundle 内的 Node 子进程，两者均属于同一款 App**。
+
+- 默认不启动任何引擎；首次选择 `mock`，可通过「安全 Mock 自检」验证端口及离线控制。
+- 点击「启动内置引擎」后，由内嵌进程监听 `127.0.0.1:8787/8789`，iOS WebSocket 默认 `127.0.0.1:8788`。若发现外部服务占用这些端口，拒绝重复启动。
+- Telegram 凭证、桥接密钥由 Keychain 保存，应用安装包中没有真实 Token。用户可以手动导入旧版管理员 ID 和密钥，但**不会自动沿用旧设备的 BLE 模式**。
+- 「权限中心」对蓝牙、麦克风、系统录屏/音频、通知等逐一触发 macOS API 申请。仅在用户点击时请求，已拒绝的授权需通过系统设置恢复。
+- 退出 App 时会先检查是否存在非零强度或状态不确定的会话，避免一边真实输出一边无提示杀死控制进程；意外退出有子进程父 PID 看门狗尝试安全停机，但物理断连时无法保证归零指令抵达。
+
+更详细的独立构建方案见 [macOS App README](../macos/DGLabConsole/README.md)。

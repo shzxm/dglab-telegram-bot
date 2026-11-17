@@ -76,7 +76,7 @@ export class SystemAudioReactiveController {
   private readonly helperPath: string;
 
   constructor(private readonly device: Device, helperPath?: string) {
-    this.helperPath = helperPath ?? join(homedir(), ".local", "bin", "dglab-system-audio-meter");
+    this.helperPath = helperPath ?? process.env.DGLAB_AUDIO_HELPER_PATH ?? join(homedir(), ".local", "bin", "dglab-system-audio-meter");
   }
   get mode(): AudioMode { return this.running ?? "off"; }
   isEnabled(mode: "volume" | "beat"): boolean {

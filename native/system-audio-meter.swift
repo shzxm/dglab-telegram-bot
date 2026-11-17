@@ -77,6 +77,14 @@ final class SystemAudioMeter: NSObject, SCStreamOutput, SCStreamDelegate, @unche
             let stream = SCStream(filter: filter, configuration: configuration, delegate: meter)
             try stream.addStreamOutput(meter, type: .audio, sampleHandlerQueue: DispatchQueue(label: "com.dglab.audio.capture"))
             try await stream.startCapture()
+            if CommandLine.arguments.contains("--permission-test") {
+                // This is requested only by a dedicated user-visible button.
+                // The stream is stopped immediately and never saves audio data.
+                try await Task.sleep(for: .milliseconds(700))
+                try await stream.stopCapture()
+                print("{\"permission_test_ok\":true}")
+                return
+            }
             fputs("system audio capture started\n", stderr)
             let heartbeat = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in meter.emitSilenceIfIdle() }
             // Retain the stream until the parent process terminates us.

@@ -9,10 +9,20 @@
     <key>CFBundleName</key><string>DG-LAB 控制台</string>
     <key>CFBundleDisplayName</key><string>DG-LAB 控制台</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>1.1.0</string>
+    <key>CFBundleVersion</key><string>2</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>需要蓝牙权限才能在您手动点击连接后操作 DG-LAB V2 设备。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>仅在您主动选择麦克风相关功能时读取音量指标，不保存录音。</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>应您的请求，分析 Mac 系统输出音频的音量与节拍；不保存屏幕或录音。</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>允许在您主动开启声控后通过 ScreenCaptureKit 分析系统音频，不保存原始音频。</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>当您主动将 iOS 桥接开放到可信局域网时，允许 iPhone App 与 Mac 控制器连接。</string>
     <key>NSAppTransportSecurity</key>
     <dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>

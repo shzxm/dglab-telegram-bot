@@ -1,66 +1,51 @@
-# DG-LAB 控制台 for macOS
+# DG-LAB Console for macOS (独立版)
 
-[DG-LAB Telegram Bot 主仓库](https://github.com/shzxm/dglab-telegram-bot) · [iOS 客户端](https://github.com/shzxm/dglab-ios) · MIT
+基于原生 SwiftUI 的 DG-LAB V2 控制端。**本版把完整 Node.js 运行时、Telegraf Telegram Bot、BLE 控制、波形、双通道自动提升、ScreenCaptureKit 系统声音分析、OBS、本地 HTTP API 和 iOS WebSocket 桥接一并封装到 `.app` 内**。
 
-本项目是 DG-LAB V2 Telegram Bot 的 **原生 SwiftUI macOS 图形控制台**，不是第二个 Telegram Bot。所有真实蓝牙、波形和会话仍由同一个已部署的 Node.js 服务负责，App 提供一站式操作面板，避免从聊天菜单和命令行中反复切换。
+App **不依赖** Homebrew Node.js、单独的 `com.dglab.telegram-bot` LaunchAgent 或外部已运行的 Bot 服务。实现方式是 SwiftUI 主进程 + App 内的 Node.js 子进程，它们同属一个应用安装包；**不是全 Swift 重写**。
 
-## 控制功能
+## 首次操作
 
-- **总览**：API / 蓝牙设备状态、电量、A/B 当前强度、参与人数；创建管理员/投票/活动会话、明确确认后授权启动；设备连接/断开、紧急停止。
-- **A/B 双通道**：独立 ±1/±3/±5 调整；9 组波形；1–60 秒自动提升间隔和本轮自动增加 1–33 级上限；各自启停与进度。
-- **声音响应**：macOS 系统音量与节拍响应，双模式可分别启停；A/B/双通道目标；固定 1/20/50/100 Hz、4 组常用范围和自定义 1–100 Hz 端点。
-- **Telegram/直播**：邀请码、管理员加入、队列、随机操作员、动作池、群绑定及强度/波形投票。
-- **API / 服务**：Keychain 凭证、HTTP 状态/命令、可编辑 JSON 请求、访问代码示例；查看现有 LaunchAgent、启动、安全重启或停止后台。
-- **OBS**：打开由现有 Bot 托管的 `/obs` 页面。
+1. 打开 `DG-LAB Console.app`，进入「**权限中心**」。根据需要逐项点击蓝牙、屏幕录制、系统音频测试、麦克风和通知权限；已拒绝的权限需前往系统设置修改。系统音频测试仅短时捕获，不保存音频或屏幕。
+2. 进入「**内置引擎**」。设备默认 `mock`（不接触硬件）；可选择 `ble`（Mac 蓝牙）或 `ios`（iPhone 蓝牙主机），但必须在现场确认设备和硬件急停方式后切换。
+3. 若需要 Telegram，开启 Telegram 选项，填写 BotFather Token、管理员数字 ID 或点击「读取旧版非敏感设置与凭证」。Token 单独保存在 Keychain 中，不进入安装包。
+4. 点击 **启动 App 内置引擎**，待页面显示 API 已连接；然后在总览、A/B 通道、声控、Telegram 和 API 页面使用功能。关闭 GUI 窗口不会启动额外 Bot，退出 App 前必须先停止活动输出。
 
-## 安装
+## 功能
 
-已部署 Bot 的 Mac：
+- **设备与会话**：Mock/真实 macOS BLE/iPhone BLE 主机模式，连接/断开、A/B 强度、9 种波形、独立会话上限、停止/归零。
+- **双通道自动提升**：间隔 1–60 秒、本轮累计提升 +1 至 +33 级后停止，A/B 分别设置、倒数和进度。
+- **声音响应**：系统音频音量和节拍模式可单独或同时启用；固定频率、常见区间及自定义 1–100 Hz。
+- **Telegram 多人协作**：邀请码、群绑定、投票、活动队列、抽选与动作池。Telegram 选项关闭后，**本地 Mock/控制面板仍可以工作**，无需 Bot Token。
+- **系统权限中心**：蓝牙、屏幕录制、系统音频捕获测试、麦克风、局域网设置、通知、文件选择及可选辅助功能。明确提示授权状态，不绕过 macOS TCC。
+- **OBS 与 API**：`127.0.0.1:8787/obs`、`127.0.0.1:8789/v1/status|capabilities|command`；手机 WebSocket 端口默认 8788。Bearer 鉴权，连接设备/启动输出需要二次确认。
 
-```bash
-cd dglab-telegram-bot/macos/DGLabConsole
-./Scripts/build-app.sh
-mkdir -p "$HOME/Applications"
-cp -R 'build/DG-LAB Console.app' "$HOME/Applications/"
-open "$HOME/Applications/DG-LAB Console.app"
-```
+## 安全边界
 
-运行需要 macOS 14+。**构建需要完整 Xcode 27.2（或具备 SwiftUI 宏插件的兼容版本）**：MBP 的单独 Command Line Tools 可以解析普通 SwiftUI 类型，但缺少 SwiftUIMacros 编译插件，无法独立构建此图形界面。可在 Mac mini 等装有完整 Xcode 的机器构建 `.app` 后直接安装到 MBP，运行应用不需要安装 Xcode。生成的 `.app` 使用**临时 ad-hoc 签名**，不属于公证发行包。
+- 初始设备模式 `mock`；启动内置引擎**不自动连接蓝牙**或开始输出。
+- 同时只能有**一个控制引擎**：App 检查本地端口，若旧 Node/LaunchAgent 已运行则拒绝重复启动。建议让旧 `com.dglab.telegram-bot` 保持关闭。
+- 退出 App 前检查 A/B 会话与设备输出，非零或状态不确定时拒绝关闭；用户先按紧急停止再退出。内置引擎定时检查父进程是否仍存活，异常退出时尝试安全停机。
+- 软件停止/归零**不能保证失联设备一定收到指令**。任何实际使用必须有单独、立即可用的物理停止或断开手段。`133` 为软件档位范围，**不是人体安全阈值**。
+- 当前为临时 ad-hoc 签名版，非 Apple Developer ID 签名或公证；蓝牙、ScreenCaptureKit 权限归属可能与独立音频助手有关，必须在 MBP 上点按钮实际授权并检查。
 
-首次打开时 App 会尝试从当前用户钥匙串读取服务名 `dglab-ios-bridge` 的独立桥接密钥。若需要批准读取，请在 macOS 授权；也可在「API 与服务」页面填写该密钥并保存到 App 专属 Keychain。**不要输入 BotFather Token。**
+## 开发与打包
 
-运行时依赖现有 Node.js 后台服务及其 LaunchAgent。UI 默认访问 `http://127.0.0.1:8789`，不启动第二个 Bot，也不复制当前用户配置。
-
-## 启用本地 API
-
-macOS Bot 需要 `IOS_BRIDGE_TOKEN`（至少 32 字符）；和 iOS WebSocket 桥接共用这份**独立于 Telegram Token 的管理员密钥**，默认自动启用：
-
-- `GET http://127.0.0.1:8789/health`：本机健康，不返回设备秘密。
-- `GET http://127.0.0.1:8789/v1/status`：需 Bearer，返回会话、设备、电量、音频、自动提升和 OBS 位置。
-- `GET http://127.0.0.1:8789/v1/capabilities`：需 Bearer，返回可用命令、波形、范围。
-- `POST http://127.0.0.1:8789/v1/command`：需 Bearer，命令和参数走白名单与原会话权限校验。
-
-`DG_LOCAL_API_PORT=8789` 可改端口，但 API **始终只监听 127.0.0.1**，不可开放到公网。详细请求示例见 [../../docs/LOCAL_CONTROL_API.md](../../docs/LOCAL_CONTROL_API.md)。
-
-**需要二次确认的命令**：`session.arm` 必须设置 `X-DGLab-Confirm: arm`，`device.connect` 必须设置 `X-DGLab-Confirm: connect`。App 按钮会先弹出确认窗口。其他命令遵守服务端现有强度上限和速率限制。
-
-## 重要设计选择
-
-1. **一个 Bot 进程**：macOS GUI / iOS App / Telegram 群共享同一份 ControlSession。App 退出不结束 Bot，会话仍由原来的后台服务管理。
-2. **API 最小暴露**：仅监听回环、本机密钥认证、命令白名单、命令速率限制，浏览器跨源请求被拒绝；不会提供 shell exec API。
-3. **服务管理防护**：只有当 API 新鲜读取确认 `active=false` 且会话与设备 A/B 都为 0，才允许 App 停止或重启 LaunchAgent。若无法判断，拒绝操作。
-4. **设备安全**：软件在会话停止、BLE 错误时尝试归零，但断连情况下无法保证控制包抵达。实体设备必须有独立、立即可用的停止/断开方式。`133` 为软件数值上限，不代表人体安全值。
-5. **设备模式**：`DG_DEVICE_MODE=ble` 由 Mac 控制 DG-LAB，`ios` 模式把设备输出托管给 iPhone，`mock` 模式仅测试。App 不会自动切换现有部署的设备模式。
-
-## 界面与接口测试
+运行需 macOS 14+、Apple Silicon。**运行不需要外部 Node、Homebrew 或完整 Xcode**。构建需完整 Xcode（macOS SwiftUI 编译），以及准备运行时的 Node/npm 和网络：
 
 ```bash
-swift build --jobs 2
+cd dglab-telegram-bot
+./macos/DGLabConsole/Scripts/prepare-runtime.sh
+cd macos/DGLabConsole
 ./Scripts/build-app.sh
-cd ../..
-npm run typecheck
-npm test
-npm run build
+open 'build/DG-LAB Console.app'
 ```
 
-命令行/模拟 Mock 通过不能替代 DG-LAB 实体蓝牙验收。导出时不要将 `.env`、`config.json`、Keychain 密钥或签名文件放入 `.app` 与仓库。
+`prepare-runtime.sh` 使用**固定 SHA-256 验证** Node.js 24.13.0 官方 ARM64 二进制，安装生产依赖、编译原本 TypeScript 与系统音频助手。编译产物在 `.runtime-cache/`，不会提交到仓库。完整 `.app` 包括 `Contents/MacOS/DGLabConsole`、`Contents/Helpers/node`、`Contents/Helpers/dglab-system-audio-meter`、`Contents/Resources/Engine`。
+
+MBP 如果只有 Command Line Tools 而没有完整 Xcode，可以在另一台有完整 Xcode 的 Mac 编译图形可执行程序，然后在 MBP 用 `DG_GUI_BINARY=/path/to/DGLabConsole ./Scripts/build-app.sh` 把自己的内置运行时一起打包。
+
+## 与 iOS App 的关系
+
+iOS App [dglab-ios](https://github.com/shzxm/dglab-ios) 可选择完全独立蓝牙控制，也可通过 WebSocket 桥接与 macOS App 内的引擎共享 Telegram 会话。Mac BLE / iPhone BLE 两种主机模式不能同时连接同一设备。iOS 桥接通过独立高熵密钥授权，**不复制 Telegram Bot Token 到手机**。
+
+详见 [本地 API](../../docs/LOCAL_CONTROL_API.md)、[桥接协议](../../docs/IOS_BRIDGE.md) 与 [架构](../../docs/ARCHITECTURE.md)。

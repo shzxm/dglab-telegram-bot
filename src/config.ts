@@ -33,9 +33,12 @@ interface FileConfig {
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   const file = readFileConfig(env.DGLAB_CONFIG_FILE);
-  const token = (env.TG_BOT_TOKEN ?? file.telegramToken ?? "").trim();
+  // Explicit local-only mode runs the full local control stack without contacting Telegram.
+  // This is useful for first-launch setup and mock/safety testing. It never polls Bot API.
+  const localOnly = env.DG_DESKTOP_OFFLINE === "1";
+  const token = (env.TG_BOT_TOKEN ?? file.telegramToken ?? (localOnly ? "123456:LOCAL_TEST_TOKEN_NEVER_USED" : "")).trim();
   if (!/^\d{6,15}:[A-Za-z0-9_-]{20,}$/.test(token)) throw new Error("TG_BOT_TOKEN is missing or invalid; configure it through Keychain or environment");
-  const ownerUserId = parseSafeInteger(env.TG_OWNER_USER_ID ?? value(file.ownerUserId), "TG_OWNER_USER_ID");
+  const ownerUserId = parseSafeInteger(env.TG_OWNER_USER_ID ?? value(file.ownerUserId) ?? (localOnly ? "1" : undefined), "TG_OWNER_USER_ID");
   const allowedChatId = parseSafeInteger(env.TG_ALLOWED_CHAT_ID ?? value(file.allowedChatId) ?? String(ownerUserId), "TG_ALLOWED_CHAT_ID");
   const deviceMode = (env.DG_DEVICE_MODE ?? file.deviceMode ?? "mock") as string;
   if (deviceMode !== "mock" && deviceMode !== "ble" && deviceMode !== "ios") throw new Error("DG_DEVICE_MODE must be mock, ble or ios");

@@ -3,8 +3,8 @@ import Combine
 import Foundation
 import Security
 
-// The native UI is only a client. Telegram polling and all physical output
-// remain in the existing single Node.js backend.
+// Single integrated macOS app: the native UI owns an embedded Node engine.
+// Both share the exact existing ControlSession, but no LaunchAgent is required.
 struct ConsoleDevice: Decodable {
     var connected: Bool? = nil
     var battery: Int? = nil
@@ -57,9 +57,11 @@ private struct StatusEnvelope: Decodable {
     let state: ConsoleSnapshot
 }
 
-private enum ConsoleKeychain {
+enum ConsoleKeychain {
     static let appService = "com.shzxm.dglab-macos-console.token"
     static let existingBridgeService = "dglab-ios-bridge"
+    static let botService = "com.shzxm.dglab-macos-console.bot-token"
+    static let legacyBotService = "dglab-telegram-bot"
 
     static func load(service: String) -> String? {
         let query: [String: Any] = [
@@ -73,9 +75,9 @@ private enum ConsoleKeychain {
               let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
-    static func save(_ secret: String) -> Bool {
+    static func save(_ secret: String, service: String = appService) -> Bool {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                    kSecAttrService as String: appService,
+                                    kSecAttrService as String: service,
                                     kSecAttrAccount as String: "local-admin"]
         SecItemDelete(query as CFDictionary)
         var payload = query
@@ -102,7 +104,24 @@ final class ConsoleModel: ObservableObject {
 
     private var secret = ""
     private let session: URLSession
-    private let service = "com.dglab.telegram-bot"
+    let embeddedEngine = EmbeddedEngine()
+    @Published var telegramEnabled = false {
+        didSet { UserDefaults.standard.set(telegramEnabled, forKey: "DGDesktopTelegramEnabled") }
+    }
+    @Published var selectedDeviceMode = "mock" {
+        didSet { UserDefaults.standard.set(selectedDeviceMode, forKey: "DGDesktopDeviceMode") }
+    }
+    @Published var ownerUserID = "" {
+        didSet { UserDefaults.standard.set(ownerUserID, forKey: "DGDesktopOwnerID") }
+    }
+    @Published var allowedChatID = "" {
+        didSet { UserDefaults.standard.set(allowedChatID, forKey: "DGDesktopChatID") }
+    }
+    @Published var bridgeHost = "127.0.0.1" {
+        didSet { UserDefaults.standard.set(bridgeHost, forKey: "DGDesktopBridgeHost") }
+    }
+    @Published var enteredBotToken = ""
+    @Published private(set) var botTokenPresent = false
 
     init() {
         let savedPort = UserDefaults.standard.integer(forKey: "DGLabLocalAPIPort")
@@ -112,14 +131,27 @@ final class ConsoleModel: ObservableObject {
         config.timeoutIntervalForResource = 10
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         session = URLSession(configuration: config)
+        telegramEnabled = UserDefaults.standard.bool(forKey: "DGDesktopTelegramEnabled")
+        selectedDeviceMode = UserDefaults.standard.string(forKey: "DGDesktopDeviceMode") ?? "mock"
+        ownerUserID = UserDefaults.standard.string(forKey: "DGDesktopOwnerID") ?? ""
+        allowedChatID = UserDefaults.standard.string(forKey: "DGDesktopChatID") ?? ""
+        bridgeHost = UserDefaults.standard.string(forKey: "DGDesktopBridgeHost") ?? "127.0.0.1"
     }
 
     func prepare() {
         if secret.isEmpty {
             secret = ConsoleKeychain.load(service: ConsoleKeychain.appService)
                 ?? ConsoleKeychain.load(service: ConsoleKeychain.existingBridgeService) ?? ""
+            if secret.isEmpty {
+                var entropy = [UInt8](repeating: 0, count: 32)
+                if SecRandomCopyBytes(kSecRandomDefault, entropy.count, &entropy) == errSecSuccess {
+                    let random = entropy.map { String(format: "%02x", $0) }.joined()
+                    if ConsoleKeychain.save(random) { secret = random }
+                }
+            }
             keyPresent = !secret.isEmpty
         }
+        botTokenPresent = telegramSecret() != nil
         Task { await refresh() }
         Task { await refreshServiceStatus() }
     }
@@ -201,72 +233,77 @@ final class ConsoleModel: ObservableObject {
         if log.count > 40 { log.removeLast(log.count - 40) }
     }
 
-    private func launchctl(_ args: [String]) async throws -> String {
-        try await Task.detached(priority: .utility) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            process.arguments = args
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            try process.run()
-            // launchctl output is small and the command is bounded to fixed arguments.
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            guard process.terminationStatus == 0 else {
-                throw NSError(domain: "launchctl", code: Int(process.terminationStatus),
-                              userInfo: [NSLocalizedDescriptionKey: output.isEmpty ? "操作失败" : output])
-            }
-            return output
-        }.value
+    func bridgeSecret() -> String { secret }
+    func telegramSecret() -> String? {
+        ConsoleKeychain.load(service: ConsoleKeychain.botService)
+            ?? ConsoleKeychain.load(service: ConsoleKeychain.legacyBotService)
+    }
+    func saveBotToken() {
+        let value = enteredBotToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.range(of: #"^\d{6,15}:[A-Za-z0-9_-]{20,}$"#, options: .regularExpression) != nil else {
+            errorMessage = "Telegram Bot Token 格式错误"; return
+        }
+        guard ConsoleKeychain.save(value, service: ConsoleKeychain.botService) else {
+            errorMessage = "保存 Bot Token 到钥匙串失败"; return
+        }
+        enteredBotToken = ""
+        botTokenPresent = true
+        note("Telegram 凭证已安全保存")
+    }
+    func importLegacyConfiguration() {
+        // Only extract non-secret configuration keys, never copy a private plist
+        // or store the historic Bot Token inside the app's public package.
+        let file = NSHomeDirectory() + "/Library/LaunchAgents/com.dglab.telegram-bot.plist"
+        if let data = FileManager.default.contents(atPath: file),
+           let dict = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+           let env = dict["EnvironmentVariables"] as? [String: String] {
+            if ownerUserID.isEmpty { ownerUserID = env["TG_OWNER_USER_ID"] ?? "" }
+            if allowedChatID.isEmpty { allowedChatID = env["TG_ALLOWED_CHAT_ID"] ?? "" }
+            // NEVER import the previous deviceMode automatically: first-run mock.
+        }
+        botTokenPresent = telegramSecret() != nil
+        note("已读取旧配置的非敏感字段；设备模式保持当前选择")
+    }
+    func appendEngineMessage(_ message: String) {
+        for line in message.split(separator: "\n").prefix(8) {
+            let value = String(line).prefix(250)
+            note(String(value))
+        }
     }
     func refreshServiceStatus() async {
-        do {
-            let value = try await launchctl(["print", "gui/\(getuid())/\(service)"])
-            serviceLabel = value.contains("state = running") ? "后台 Bot：运行中" : "后台 Bot：已加载但未运行"
-        } catch { serviceLabel = "后台 Bot：未注册或无法读取" }
+        serviceLabel = embeddedEngine.running ? "内置引擎：运行中" : "内置引擎：已停止"
     }
+    func runSelfTest() {
+        Task {
+            guard !embeddedEngine.running else {
+                errorMessage = "请先停止内置引擎，再进行独立 Mock 自检"; return
+            }
+            await embeddedEngine.start(model: self, diagnosticMock: true)
+            if connected, let fresh = try? await fetchSnapshot(),
+               fresh.deviceMode == "mock", fresh.safeToRestart {
+                appendEngineMessage("自检成功：内置 Node/REST/OBS/模拟设备均可运行，没有实体输出")
+                await embeddedEngine.stop(model: self)
+            } else {
+                errorMessage = "Mock 自检失败：请查看日志和本地 API 状态"
+            }
+        }
+    }
+
     func manageService(_ action: String) {
         Task {
             isWorking = true
             defer { isWorking = false }
-            do {
-                if action == "restart" || action == "stop" {
-                    let fresh = try await fetchSnapshot()
-                    guard fresh.safeToRestart else {
-                        throw NSError(domain: "DG-LAB", code: 423,
-                                    userInfo: [NSLocalizedDescriptionKey: "存在活动输出或状态不确定，拒绝重启/停止后台；请先停止会话并归零"])
-                    }
-                }
-                let domain = "gui/\(getuid())/\(service)"
-                switch action {
-                case "start":
-                    // Never use -k when the service could already be controlling a device.
-                    let details = try? await launchctl(["print", domain])
-                    if details?.contains("state = running") == true {
-                        note("Bot 已运行，无需重新启动")
-                    } else if details == nil {
-                        let plist = NSHomeDirectory() + "/Library/LaunchAgents/\(service).plist"
-                        _ = try await launchctl(["bootstrap", "gui/\(getuid())", plist])
-                        note("Bot 已加载")
-                    } else {
-                        _ = try await launchctl(["kickstart", domain])
-                        note("Bot 已启动")
-                    }
-                case "restart":
-                    _ = try await launchctl(["kickstart", "-k", domain]); note("Bot 已重新加载")
-                case "stop":
-                    _ = try await launchctl(["bootout", domain]); note("Bot 服务已停止")
-                default: return
-                }
-                try? await Task.sleep(nanoseconds: 950_000_000)
-                await refreshServiceStatus()
-                await refresh()
-            } catch { errorMessage = "服务操作失败：\(error.localizedDescription)" }
+            switch action {
+            case "start": await embeddedEngine.start(model: self)
+            case "restart":
+                // Explicit two-step workflow to avoid starting a second engine.
+                await embeddedEngine.stop(model: self)
+                errorMessage = "引擎已请求安全停止，请确认退出后再点击启动。"
+            case "stop": await embeddedEngine.stop(model: self)
+            default: break
+            }
         }
     }
-
     var obsURL: URL? { URL(string: snapshot?.obsURL ?? "http://127.0.0.1:8787/obs") }
     var localAPIBase: String { "http://127.0.0.1:\(apiPort)" }
     var generatedCurlExample: String {

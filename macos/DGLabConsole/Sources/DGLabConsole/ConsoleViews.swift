@@ -6,7 +6,9 @@ private enum Page: String, CaseIterable, Identifiable {
     case channels = "A/B 通道"
     case audio = "声音响应"
     case telegram = "Telegram / 活动"
-    case api = "API 与服务"
+    case engine = "内置引擎"
+    case permissions = "权限中心"
+    case api = "本地 API"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -14,6 +16,8 @@ private enum Page: String, CaseIterable, Identifiable {
         case .channels: return "slider.horizontal.3"
         case .audio: return "waveform"
         case .telegram: return "person.2.bubble"
+        case .engine: return "cpu"
+        case .permissions: return "hand.raised"
         case .api: return "terminal"
         }
     }
@@ -77,6 +81,8 @@ struct ConsoleWindow: View {
                         case .channels: ChannelsPage()
                         case .audio: AudioPage()
                         case .telegram: TelegramPage()
+                        case .engine: EnginePage()
+                        case .permissions: PermissionsPage()
                         case .api: APIPage()
                         }
                         if !model.lastMessage.isEmpty {
@@ -454,8 +460,8 @@ private struct APIPage: View {
     ]
 
     var body: some View {
-        Text("API 与服务").font(.largeTitle.bold())
-        GroupBox("后台 Telegram Bot") {
+        Text("本地 API").font(.largeTitle.bold())
+        GroupBox("App 内置控制引擎") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Label(model.serviceLabel, systemImage: "server.rack")
@@ -463,13 +469,12 @@ private struct APIPage: View {
                     Button("检查状态") { Task { await model.refreshServiceStatus() } }
                 }
                 HStack {
-                    Button("启动后台") { model.manageService("start") }
-                    Button("安全重启") { confirmRestart = true }
-                        .disabled(model.snapshot?.safeToRestart != true)
-                    Button("停止后台") { confirmStopService = true }
-                        .disabled(model.snapshot?.safeToRestart != true)
+                    Button("启动内置引擎") { model.manageService("start") }
+                        .disabled(model.embeddedEngine.running)
+                    Button("安全停止引擎") { confirmStopService = true }
+                        .disabled(!model.embeddedEngine.running || model.snapshot?.safeToRestart != true)
                 }
-                Text("重启与停止前会重新读取真实设备和会话强度。若 API 失联或状态不确定，将拒绝操作。启动/停止的是现有 LaunchAgent，不会再启动第二个 Telegram Bot。")
+                Text("内置引擎属于此 App，无需旧 LaunchAgent 或外部 Node.js。停止前重新读取设备与会话状态，若状态未知则拒绝。")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(10)
         }
@@ -534,12 +539,9 @@ private struct APIPage: View {
         .confirmationDialog("确认执行可能涉及真实设备的操作？", isPresented: $confirmDanger) {
             Button("我确认现场设备准备就绪") { sendCommand() }
         } message: { Text("连接或授权操作可能导致设备开始输出；请确认实体停止方式可立即使用。") }
-        .confirmationDialog("安全重启 Bot 服务？", isPresented: $confirmRestart) {
-            Button("确认重启") { model.manageService("restart") }
-        } message: { Text("应用将再次向后台核查活动会话和 A/B 输出；只有确定全部归零时才允许重启。") }
-        .confirmationDialog("停止 Bot 服务？", isPresented: $confirmStopService) {
-            Button("确认停止后台") { model.manageService("stop") }
-        } message: { Text("只有在会话和设备输出均为零时才允许停止后台。") }
+        .confirmationDialog("安全停止 App 内置引擎？", isPresented: $confirmStopService) {
+            Button("确认停止") { model.manageService("stop") }
+        } message: { Text("只有在会话和设备输出均为零时才允许停止内置引擎。") }
     }
 
     private func sendCommand() {

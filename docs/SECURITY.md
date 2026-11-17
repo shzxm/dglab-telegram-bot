@@ -24,3 +24,12 @@
 macOS GUI 不持有 BotFather Token；仅从 Keychain 读取或保存单独的 `IOS_BRIDGE_TOKEN`，经 `http://127.0.0.1:8789` 调用带 Bearer 的本地控制 API。API 固定只监听回环，不支持公开地址；禁止跨源 Origin 请求、过滤命令白名单、限制每秒调用次数。调用 `device.connect` / `session.arm` 时必须额外带明确确认头，GUI 提供现场确认框。
 
 GUI 的 LaunchAgent 重启/停止按钮会现场重新读取 API 状态，仅在会话 inactive 且设备与会话两套 A/B 强度都为 0 时执行；无法获取状态时拒绝操作。即便软件显示已归零，也不能代替实体硬件安全停止。
+
+
+## 自包含 Mac App 与 TCC 授权
+
+原生 App 包含其自己的 Node 子进程、生产依赖及音频辅助程序；只有用户点击「启动内置引擎」才运行，并拒绝在旧服务占用 API/OBS 端口时启动第二个控制器。初始模式 `mock`。用户的高熵桥接密钥和 Bot Token 均保存在 Keychain，不编入程序或日志；导入旧配置需要用户明确点击。
+
+系统权限由 macOS TCC 管理。蓝牙使用 CoreBluetooth 权限接口；麦克风使用 AVFoundation；屏幕与系统音频使用 CoreGraphics/ScreenCaptureKit；通知使用 UserNotifications。局域网和已拒绝的权限提供系统设置入口。**任何一个按钮都不能代替用户批准或保证音频子进程的 TCC 归属。**
+
+必须牢记，用户终止进程、BLE 断开或系统挂起时，最后一条零输出指令不一定成功送达设备；不允许把 App 退出防护宣传为物理急停替代方案。

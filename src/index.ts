@@ -850,7 +850,8 @@ if (iosBridge) {
   iosBridge.listen(host, port);
 }
 
-bot.launch({ dropPendingUpdates: true }).then(async () => {
+if (process.env.DG_DESKTOP_OFFLINE !== "1") {
+  bot.launch({ dropPendingUpdates: true }).then(async () => {
   await bot.telegram.setMyCommands([
     { command: "start", description: "打开控制面板或使用邀请码加入" },
     { command: "help", description: "查看中文操作说明" },
@@ -870,7 +871,21 @@ bot.launch({ dropPendingUpdates: true }).then(async () => {
   ]);
   console.log(`DG-LAB Telegram bot started in ${config.deviceMode === "ble" ? "BLE" : config.deviceMode === "ios" ? "iOS relay" : "MOCK"} mode`);
   console.log(`OBS overlay: http://${obsHost}:${obsPort}/obs`);
-});
+  }).catch((error) => console.error("Telegram launch error", error));
+} else {
+  console.log("DG-LAB desktop local-only mode: Telegram polling disabled");
+}
+
+// A GUI crash must not leave an independent embedded engine controlling hardware.
+// The process watchdog is silent when no GUI parent is provided (standalone Bot).
+if (process.env.DG_DESKTOP_PARENT_PID) {
+  const parentPid = Number(process.env.DG_DESKTOP_PARENT_PID);
+  if (!Number.isSafeInteger(parentPid) || parentPid < 2) throw new Error("Invalid desktop parent PID");
+  setInterval(() => {
+    try { process.kill(parentPid, 0); }
+    catch { void shutdown("SIGTERM"); }
+  }, 1200).unref();
+}
 
 async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   stopAudioReactive();
@@ -880,7 +895,11 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   obsServer.close();
   iosBridge?.close();
   localAPI?.close();
-  bot.stop(signal);
+  if (process.env.DG_DESKTOP_OFFLINE !== "1") {
+    try { bot.stop(signal); } catch (error) {
+      console.error("Telegram bot shutdown warning", error);
+    }
+  }
 }
 
 process.once("SIGINT", () => { void shutdown("SIGINT"); });

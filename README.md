@@ -48,14 +48,17 @@ flowchart TD
 
 **两条 BLE 线路互斥。** `ios` 模式需要 iPhone 本地再次确认授权，不能用 iPhone 的桥接密钥绕过手机本地限幅。完整关系、协议和部署说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/IOS_BRIDGE.md](docs/IOS_BRIDGE.md)。
 
-## macOS 原生控制台（SwiftUI）
+## macOS 原生独立 App（SwiftUI）
 
-本仓库同时提供 [DG-LAB macOS Console](macos/DGLabConsole/README.md)，将现有 Bot 的设备、A/B 强度与波形、自动提升、系统音频、群聊投票/活动、OBS 和本地 API 统一到一个简洁窗口。**只使用已有 Bot 的一个后台进程，不重复登录 Telegram，也不重复占用蓝牙。**
+原生 [DG-LAB Console for macOS](macos/DGLabConsole/README.md) 已升级为**自包含安装包**：包含原控制器的完整 TypeScript/Node.js 生产服务、macOS BLE、系统音频辅助程序、Telegram、投票/活动、OBS、iOS WebSocket 桥接和本地 API。App 内的 SwiftUI 主进程负责启动、停止和监控自己的内置 Node 子进程，**不再依赖另外安装的 Homebrew Node 或旧 `com.dglab.telegram-bot` LaunchAgent**。
 
-- 本地控制 API：`http://127.0.0.1:8789`，仅回环地址、Bearer 鉴权、操作白名单；详细说明见 [docs/LOCAL_CONTROL_API.md](docs/LOCAL_CONTROL_API.md)。
-- App 启动时尝试从 macOS Keychain 读取现有 iOS 桥接密钥，也可以在 App 中手动输入并存入自己的 Keychain。
-- macOS App 可安全管理已有 LaunchAgent：只有确认会话未激活、设备 A/B 都归零才允许停止或重启后台。
-- MBP 本机不装完整 Xcode 时，可在另一台 Mac 用完整 Xcode 编译 `.app`，复制回 MBP 直接运行。
+- **默认安全模式**：首次打开不自动启动引擎；设备模式为 `mock`，用户点击「启动内置引擎」才运行。可先执行「安全 Mock 自检」，不连接 Telegram 或蓝牙。
+- **权限中心**：蓝牙、麦克风、屏幕录制、系统音频实际短时测试、通知、局域网设置、文件选择、可选辅助功能各有独立按钮；不能绕过 macOS 已拒绝的 TCC 授权。
+- **完整控制**：设备与会话、A/B 强度/波形、1–60 秒自动提升间隔与累计 +1–33、音量与节拍、Telegram 多人/直播/投票、OBS、本地 API、iOS 桥接。
+- **无重复轮询**：旧 LaunchAgent 应保持卸载。只有内置引擎持有 Telegram Bot Token 和蓝牙控制权。真正停止前确认会话 inactive 且 A/B 已归零。
+- **本地 API**：`http://127.0.0.1:8789`，独立 Keychain Bearer 密钥鉴权、命令白名单、连接/授权二次确认；参阅 [docs/LOCAL_CONTROL_API.md](docs/LOCAL_CONTROL_API.md)。
+
+注意：这属于**SwiftUI App + 应用内嵌的 Node.js 控制引擎**，并非把每一行原来的 TypeScript 重写成 Swift。正式 App 无额外 Node 运行环境依赖，但真实 BLE 连接与系统音频 TCC 权限仍需要用户现场授权及实体设备验收。
 
 ## 环境要求
 

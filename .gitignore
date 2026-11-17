@@ -28,6 +28,7 @@ ios/**/*.p8
 ios/*.log
 
 # Native macOS console build output and local credentials
+macos/**/.runtime-cache/
 macos/**/.build/
 macos/**/build/
 macos/**/.swiftpm/
