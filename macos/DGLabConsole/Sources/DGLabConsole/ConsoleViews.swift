@@ -480,6 +480,11 @@ private struct APIPage: View {
     @State private var confirmDanger = false
     @State private var confirmRestart = false
     @State private var confirmStopService = false
+    @State private var portInput = "8789"
+
+    private func savePort() {
+        if model.saveAPIPort(portInput) { portInput = String(model.apiPort) }
+    }
 
     private let commands = [
         "status", "device.status", "device.connect", "session.create", "session.arm",
@@ -511,12 +516,23 @@ private struct APIPage: View {
         GroupBox("本地 API · 仅 127.0.0.1") {
             VStack(alignment: .leading, spacing: 11) {
                 LabeledContent("API 地址", value: model.localAPIBase)
-                HStack {
-                    Stepper("端口：\(model.apiPort)", value: $model.apiPort, in: 1024...65535)
-                        .frame(width: 210)
-                    Text("默认 8789；修改端口后，后台的 DG_LOCAL_API_PORT 也必须相同。")
-                        .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Text("API 端口")
+                    TextField("8789", text: $portInput)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 105)
+                        .onSubmit { savePort() }
+                        .disabled(model.embeddedEngine.running || model.isWorking)
+                    Button("保存端口") { savePort() }
+                        .disabled(model.embeddedEngine.running || model.isWorking)
+                    Button("恢复默认 8789") {
+                        portInput = "8789"
+                        savePort()
+                    }
+                    .disabled(model.embeddedEngine.running || model.isWorking)
                 }
+                Text("默认 8789；可手动输入 1024～65535 的端口号。8787、8788 已保留。停止内置引擎后修改，保存后下次启动自动同步后台。")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     SecureField("输入桥接密钥（不显示）", text: $model.enteredKey)
                     Button("保存到 App 本地") { model.saveKey() }
@@ -578,6 +594,8 @@ private struct APIPage: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
         }
+        .onAppear { portInput = String(model.apiPort) }
+        .onChange(of: model.apiPort) { _, newPort in portInput = String(newPort) }
         .confirmationDialog("确认执行可能涉及真实设备的操作？", isPresented: $confirmDanger) {
             Button("我确认现场设备准备就绪") { sendCommand() }
         } message: { Text("连接或授权操作可能导致设备开始输出；请确认实体停止方式可立即使用。") }

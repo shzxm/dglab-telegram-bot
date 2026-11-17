@@ -105,7 +105,7 @@ final class ConsoleModel: ObservableObject {
 
     init() {
         let savedPort = UserDefaults.standard.integer(forKey: "DGLabLocalAPIPort")
-        apiPort = savedPort >= 1 && savedPort <= 65535 ? savedPort : 8789
+        apiPort = (1024...65535).contains(savedPort) && savedPort != 8787 && savedPort != 8788 ? savedPort : 8789
         let config = URLSessionConfiguration.ephemeral
         // BLE scanning can legitimately take 15 seconds. Time out each request
         // explicitly below, not globally at seven seconds.
@@ -134,6 +134,30 @@ final class ConsoleModel: ObservableObject {
         AppDiagnostics.shared.append("App launched; embedded engine starts only on explicit request", category: "APP")
         Task { await refresh() }
         Task { await refreshServiceStatus() }
+    }
+
+    /// Called by an explicit Save action, never while the engine is running.
+    /// 8787 and 8788 are reserved for the bundled OBS and iOS bridge servers.
+    @discardableResult
+    func saveAPIPort(_ raw: String) -> Bool {
+        guard !embeddedEngine.running && !isWorking else {
+            errorMessage = "请先安全停止内置引擎，再修改 API 端口。"
+            return false
+        }
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty, cleaned.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let port = Int(cleaned), (1024...65535).contains(port) else {
+            errorMessage = "端口必须是 1024～65535 之间的整数。"
+            return false
+        }
+        guard port != 8787 && port != 8788 else {
+            errorMessage = "8787 与 8788 已用于 OBS 和 iOS 桥接，请使用其他端口。"
+            return false
+        }
+        apiPort = port // persisted by apiPort.didSet; passed to embedded Node at next start
+        errorMessage = ""
+        AppDiagnostics.shared.append("Local API port set to \(port)", category: "APP")
+        return true
     }
 
     func saveKey() {
