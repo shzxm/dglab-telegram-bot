@@ -18,7 +18,12 @@ for item in "$CACHE/bin/node" "$CACHE/bin/dglab-system-audio-meter" "$CACHE/Engi
   [[ -e "$item" ]] || { echo "Embedded runtime is missing: $item" >&2; exit 4; }
 done
 
-OUT="$ROOT/build/DG-LAB Console.app"
+# Use a non-file-provider staging folder. iCloud/File Provider may reattach
+# FinderInfo to an app placed under a synchronized source repository, which
+# makes macOS reject an otherwise valid code signature.
+OUTDIR="${DG_APP_OUTPUT_DIR:-$HOME/Library/Caches/DGLabConsole/Release}"
+OUT="$OUTDIR/DG-LAB Console.app"
+mkdir -p "$OUTDIR"
 rm -rf "$OUT"
 mkdir -p "$OUT/Contents/MacOS" "$OUT/Contents/Helpers" "$OUT/Contents/Resources/Engine"
 /usr/bin/ditto "$BIN" "$OUT/Contents/MacOS/DGLabConsole"

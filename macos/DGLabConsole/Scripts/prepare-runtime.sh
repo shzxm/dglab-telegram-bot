@@ -22,6 +22,9 @@ if [[ "$ACTUAL" != "$NODE_SHA256" ]]; then
 fi
 /usr/bin/tar -xOzf "$ARCHIVE" "node-v${NODE_VERSION}-darwin-arm64/bin/node" > "$OUTPUT/bin/node"
 chmod 755 "$OUTPUT/bin/node"
+# Preserve the official Node.js license and its bundled third-party notices.
+# Production npm packages also keep their individual LICENSE files.
+/usr/bin/tar -xOzf "$ARCHIVE" "node-v${NODE_VERSION}-darwin-arm64/LICENSE" > "$OUTPUT/Engine/NODEJS_LICENSE.txt"
 "$OUTPUT/bin/node" --version
 # Production package contains no TypeScript, build tools, tests, or developer secrets.
 cp package.json package-lock.json "$OUTPUT/Engine/"

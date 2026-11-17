@@ -37,7 +37,7 @@ cd dglab-telegram-bot
 ./macos/DGLabConsole/Scripts/prepare-runtime.sh
 cd macos/DGLabConsole
 ./Scripts/build-app.sh
-open 'build/DG-LAB Console.app'
+open "$HOME/Library/Caches/DGLabConsole/Release/DG-LAB Console.app"
 ```
 
 `prepare-runtime.sh` 使用**固定 SHA-256 验证** Node.js 24.13.0 官方 ARM64 二进制，安装生产依赖、编译原本 TypeScript 与系统音频助手。编译产物在 `.runtime-cache/`，不会提交到仓库。完整 `.app` 包括 `Contents/MacOS/DGLabConsole`、`Contents/Helpers/node`、`Contents/Helpers/dglab-system-audio-meter`、`Contents/Resources/Engine`。
@@ -49,3 +49,9 @@ MBP 如果只有 Command Line Tools 而没有完整 Xcode，可以在另一台�
 iOS App [dglab-ios](https://github.com/shzxm/dglab-ios) 可选择完全独立蓝牙控制，也可通过 WebSocket 桥接与 macOS App 内的引擎共享 Telegram 会话。Mac BLE / iPhone BLE 两种主机模式不能同时连接同一设备。iOS 桥接通过独立高熵密钥授权，**不复制 Telegram Bot Token 到手机**。
 
 详见 [本地 API](../../docs/LOCAL_CONTROL_API.md)、[桥接协议](../../docs/IOS_BRIDGE.md) 与 [架构](../../docs/ARCHITECTURE.md)。
+
+## 依赖许可证
+
+本 App 的源代码采用仓库的 MIT License。完整安装包还包含 Node.js 24 官方运行时（含第三方组件许可通知）及若干生产版 npm 包。`prepare-runtime.sh` 会将官方 Node.js 的许可证提取到 App 的 `Contents/Resources/Engine/NODEJS_LICENSE.txt`，npm 依赖各自的许可证文件保留在相应 `node_modules` 内。发布或二次分发必须保留这些文件。
+
+为防止 iCloud/文件提供程序自动给源码目录中的 `.app` 添加 FinderInfo 扩展属性而破坏签名，`build-app.sh` 默认将可验证的输出放在 `~/Library/Caches/DGLabConsole/Release/DG-LAB Console.app`。也可通过 `DG_APP_OUTPUT_DIR` 指定非同步磁盘目录。发布前请先用 `codesign --verify --deep --strict` 检查完整包。
