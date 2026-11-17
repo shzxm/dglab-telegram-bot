@@ -26,8 +26,8 @@ struct EnginePage: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.embeddedEngine.running || model.isWorking)
-                    Button("安全停止内置引擎") { confirmStop = true }
-                        .disabled(!model.embeddedEngine.running || model.snapshot?.safeToRestart != true)
+                    Button("停止并断开所有控制") { confirmStop = true }
+                        .disabled(!model.embeddedEngine.running || model.isWorking)
                     Button("安全 Mock 自检") { model.runSelfTest() }
                         .disabled(model.embeddedEngine.running || model.isWorking)
                     Button("刷新") { Task { await model.refresh(); await model.refreshServiceStatus() } }
@@ -88,7 +88,7 @@ struct EnginePage: View {
         } message: { Text("启动后 Telegram Bot 可连接网络；真正发出设备指令前仍需现场确认。") }
         .confirmationDialog("停止整个 App 内置控制引擎？", isPresented: $confirmStop) {
             Button("确定停止") { model.manageService("stop") }
-        } message: { Text("将再次读取会话和设备 A/B 强度，只有确定全部为 0 才执行。") }
+        } message: { Text("将依次停止声音响应和自动提升、归零会话、断开蓝牙、停止 API/Telegram 并等待内置进程结束。若无法确认安全关闭，会保留引擎并显示错误。") }
     }
 }
 
@@ -120,7 +120,7 @@ private struct PermissionRow: View {
 }
 
 struct PermissionsPage: View {
-    @StateObject private var permissions = PermissionCenter()
+    @ObservedObject private var permissions = PermissionCenter.shared
 
     var body: some View {
         Text("系统权限中心").font(.largeTitle.bold())
@@ -132,6 +132,12 @@ struct PermissionsPage: View {
             Text("不修改系统 TCC 数据库，不强制绕过用户选择")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        if !permissions.message.isEmpty {
+            Label(permissions.message, systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(8)
+        }
         GroupBox("设备及声音输入") {
             VStack(alignment: .leading, spacing: 0) {
                 PermissionRow(icon: "bolt.horizontal.circle", title: "蓝牙", subtitle: "扫描、连接 DG-LAB V2 所需；请求由本 App 发起，不自动连接设备。",
@@ -142,7 +148,7 @@ struct PermissionsPage: View {
                     status: permissions.microphone, actionLabel: "申请麦克风", action: permissions.requestMicrophone,
                     settings: { permissions.openSettings("Privacy_Microphone") })
                 Divider()
-                PermissionRow(icon: "rectangle.dashed.badge.record", title: "屏幕录制", subtitle: "ScreenCaptureKit 系统声音分析的授权入口。授权后可能需要重新启动 App。",
+                PermissionRow(icon: "rectangle.dashed.badge.record", title: "屏幕与系统音频录制", subtitle: "打开系统设置的权限页，同时触发 ScreenCaptureKit 申请；授权后可能需要重新启动 App。",
                     status: permissions.screen, actionLabel: "申请录屏", action: permissions.requestScreen,
                     settings: { permissions.openSettings("Privacy_ScreenCapture") })
                 Divider()
@@ -151,27 +157,25 @@ struct PermissionsPage: View {
                     settings: { permissions.openSettings("Privacy_ScreenCapture") })
             }.padding(.horizontal, 10)
         }
-        GroupBox("联网、通知与文件") {
+        GroupBox("局域网与通知") {
             VStack(alignment: .leading, spacing: 0) {
-                PermissionRow(icon: "network", title: "局域网", subtitle: "手机连接 Mac 的 iOS 桥接时可能需要；macOS 对本地网络权限没有统一的直接状态查询。",
-                    status: "按使用场景授权，状态请在设置中确认", actionLabel: "查看说明", action: { permissions.message = "将桥接设置为可信 LAN IP 并由手机访问时，macOS 可能弹出本地网络权限提示。" },
-                    settings: { permissions.openSettings("Privacy_LocalNetwork") })
+                PermissionRow(icon: "network", title: "局域网", subtitle: "仅当 iPhone 从局域网访问 Mac 的桥接服务时需要，不会影响本机蓝牙。",
+                    status: "无统一状态读取接口；按使用场景申请", actionLabel: "查看说明", action: {
+                        let alert = NSAlert()
+                        alert.messageText = "DG-LAB 局域网权限说明"
+                        alert.informativeText = "局域网权限用于让 iPhone 访问 Mac 的 WebSocket 桥接（8788）。在内置引擎页面把桥接监听改为可信的 Mac 内网 IP，并由手机尝试连接时，系统可能提示授权。本机独立控制不需要此权限，请勿向公网开放 8788。"
+                        alert.addButton(withTitle: "明白")
+                        alert.runModal()
+                    }, settings: { permissions.openSettings("Privacy_LocalNetwork") })
                 Divider()
                 PermissionRow(icon: "bell", title: "通知（可选）", subtitle: "未来的断线或异常告警可使用系统通知，不是蓝牙输出的必要权限。",
                     status: permissions.notifications, actionLabel: "申请通知", action: permissions.requestNotifications,
                     settings: { permissions.openSettings("Notifications") })
                 Divider()
-                PermissionRow(icon: "folder", title: "文件选择（可选）", subtitle: "通过系统文件选择框访问用户明确选择的文件，不申请整盘权限。",
-                    status: "选择时授权", actionLabel: "选择文件", action: permissions.chooseLocalFile,
-                    settings: { permissions.openSettings("Privacy_FilesAndFolders") })
-                Divider()
                 PermissionRow(icon: "hand.point.up.left", title: "辅助功能（可选）", subtitle: "普通 DG-LAB 控制不需要，仅用于未来的 GUI 自动化场景。",
                     status: permissions.accessibility, actionLabel: "申请辅助功能", action: permissions.requestAccessibility,
                     settings: { permissions.openSettings("Privacy_Accessibility") })
             }.padding(.horizontal, 10)
-        }
-        if !permissions.message.isEmpty {
-            Text(permissions.message).font(.caption).foregroundStyle(.secondary)
         }
         Text("说明：权限状态仅对应 macOS 的授权记录，不保证随 App 启动的音频助手或蓝牙驱动已经成功捕获/连接。最终仍要以实际功能诊断为准。")
             .font(.caption).foregroundStyle(.secondary)

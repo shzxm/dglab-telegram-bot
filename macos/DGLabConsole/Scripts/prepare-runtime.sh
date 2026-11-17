@@ -3,7 +3,8 @@
 # Requires Node/npm to build, but the final .app uses its own verified runtime.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-OUTPUT="$ROOT/macos/DGLabConsole/.runtime-cache"
+# Keep npm's file-heavy native dependencies out of synced/FileProvider trees.
+OUTPUT="${DG_RUNTIME_CACHE_DIR:-$HOME/Library/Caches/DGLabConsole/Runtime}"
 NODE_VERSION='24.13.0'
 NODE_PACKAGE="node-v${NODE_VERSION}-darwin-arm64.tar.gz"
 NODE_SHA256='d595961e563fcae057d4a0fb992f175a54d97fcc4a14dc2d474d92ddeea3b9f8'

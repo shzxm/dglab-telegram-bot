@@ -95,6 +95,9 @@ final class ConsoleModel: ObservableObject {
     @Published private(set) var log: [String] = []
     @Published var errorMessage = ""
     @Published private(set) var isWorking = false
+    @Published private(set) var deviceConnecting = false
+    @Published var isQuitting = false
+    private var refreshInFlight = false
     @Published private(set) var keyPresent = false
     @Published var enteredKey = ""
     @Published var apiPort: Int {
@@ -127,8 +130,10 @@ final class ConsoleModel: ObservableObject {
         let savedPort = UserDefaults.standard.integer(forKey: "DGLabLocalAPIPort")
         apiPort = savedPort >= 1 && savedPort <= 65535 ? savedPort : 8789
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 7
-        config.timeoutIntervalForResource = 10
+        // BLE scanning can legitimately take 15 seconds. Time out each request
+        // explicitly below, not globally at seven seconds.
+        config.timeoutIntervalForRequest = 45
+        config.timeoutIntervalForResource = 50
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         session = URLSession(configuration: config)
         telegramEnabled = UserDefaults.standard.bool(forKey: "DGDesktopTelegramEnabled")
@@ -176,6 +181,9 @@ final class ConsoleModel: ObservableObject {
         }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        // Seconds, with polling kept short and hardware connection allowed to
+        // complete its own 15-second discovery timeout before UI declares failure.
+        req.timeoutInterval = method == "GET" ? 2.5 : (body?["command"] as? String == "device.connect" ? 40 : 22)
         req.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         if let confirmation { req.setValue(confirmation, forHTTPHeaderField: "X-DGLab-Confirm") }
         if let body {
@@ -197,31 +205,64 @@ final class ConsoleModel: ObservableObject {
         return try JSONDecoder().decode(StatusEnvelope.self, from: bytes).state
     }
     func refresh() async {
+        guard !refreshInFlight && !isQuitting else { return }
+        refreshInFlight = true
+        defer { refreshInFlight = false }
         do {
             let current = try await fetchSnapshot()
             snapshot = current
             connected = true
-            if errorMessage.hasPrefix("API ") { errorMessage = "" }
+            if errorMessage.hasPrefix("API 连接失败") ||
+                (errorMessage == "设备未连接" && current.device?.connected == true) {
+                errorMessage = ""
+            }
         } catch {
             connected = false
-            snapshot = nil // Never present stale zero strength as permission to restart!
-            errorMessage = "API 连接失败：\(error.localizedDescription)"
+            snapshot = nil // Unknown is never treated as zero output.
+            if embeddedEngine.running && !errorMessage.hasPrefix("设备未连接") {
+                errorMessage = "API 连接失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Synchronous from the caller's perspective. Engine shutdown must NEVER
+    /// send a fire-and-forget stop and immediately SIGTERM the device owner.
+    func disconnectForShutdown() async throws {
+        let envelope = try await request(path: "/v1/command", method: "POST",
+            body: ["command": "session.disconnect", "payload": [:]])
+        guard let parsed = (try? JSONSerialization.jsonObject(with: envelope)) as? [String: Any],
+              parsed["ok"] as? Bool == true else {
+            throw NSError(domain: "DG-LAB", code: 500,
+                userInfo: [NSLocalizedDescriptionKey: "无法确认设备停止回执"])
         }
     }
     func command(_ name: String, payload: [String: Any] = [:], confirmation: String? = nil) {
+        // Avoid duplicate asynchronous BLE connection attempts; one unresolved
+        // scan can otherwise overlap the next and race a safe disconnection.
+        if name == "device.connect" && deviceConnecting { return }
         Task {
             isWorking = true
-            defer { isWorking = false }
+            if name == "device.connect" { deviceConnecting = true }
+            defer {
+                isWorking = false
+                if name == "device.connect" { deviceConnecting = false }
+            }
             do {
                 let data = try await request(path: "/v1/command", method: "POST",
                                              body: ["command": name, "payload": payload], confirmation: confirmation)
                 let response = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
                 let state = response?["state"] as? [String: Any]
                 note(state?["message"] as? String ?? "已执行 \(name)")
+                if name == "device.connect" { errorMessage = "" }
                 await refresh()
             } catch {
-                errorMessage = "操作 \(name) 被拒绝：\(error.localizedDescription)"
-                note("请求未成功：\(name)")
+                if name == "device.connect" {
+                    errorMessage = "设备未连接"
+                    note("设备连接失败：\(error.localizedDescription)")
+                } else {
+                    errorMessage = "操作 \(name) 失败：\(error.localizedDescription)"
+                    note("请求未成功：\(name)")
+                }
                 await refresh()
             }
         }
@@ -296,10 +337,10 @@ final class ConsoleModel: ObservableObject {
             switch action {
             case "start": await embeddedEngine.start(model: self)
             case "restart":
-                // Explicit two-step workflow to avoid starting a second engine.
-                await embeddedEngine.stop(model: self)
-                errorMessage = "引擎已请求安全停止，请确认退出后再点击启动。"
-            case "stop": await embeddedEngine.stop(model: self)
+                if await embeddedEngine.stop(model: self) {
+                    await embeddedEngine.start(model: self)
+                }
+            case "stop": _ = await embeddedEngine.stop(model: self)
             default: break
             }
         }

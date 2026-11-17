@@ -385,9 +385,13 @@ function scheduleSharedPanelRefresh(): void {
 async function stopSession(): Promise<void> {
   stopAutoRamp();
   stopAudioReactive();
-  await session?.stop();
-  clearOperatorState();
-  scheduleSharedPanelRefresh();
+  try {
+    if (session) await session.stop();
+    else await device.emergencyStop();
+  } finally {
+    clearOperatorState();
+    scheduleSharedPanelRefresh();
+  }
 }
 
 /** Reuses existing Telegram ControlSession logic, rather than running another Telegram poller. */
@@ -454,9 +458,9 @@ async function iosOwnerCommand(name: string, payload: Record<string, unknown>): 
   }
   case "session.stop": await stopSession(); return { ...iosSnapshot(), message: "Stopped and zeroed" };
   case "session.disconnect": {
-    if (session) await stopSession();
+    await stopSession();
     await device.disconnect(); session = null; inviteCode = "";
-    return { ...iosSnapshot(), message: "Disconnected" };
+    return { ...iosSnapshot(), device: await device.getStatus(), message: "Stopped, zeroed and disconnected" };
   }
   case "owner.delta": {
     const action = relayAction({ type: "strength_delta", ...payload });
@@ -887,20 +891,34 @@ if (process.env.DG_DESKTOP_PARENT_PID) {
   }, 1200).unref();
 }
 
+let shutdownStarted = false;
 async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
   stopAudioReactive();
   stopAutoRamp();
-  await session?.stop().catch(() => undefined);
-  await device.disconnect().catch(() => undefined);
+  let firstError: unknown;
+  try { await stopSession(); } catch (error) { firstError = error; }
+  try { await device.disconnect(); } catch (error) { firstError ??= error; }
+  if (firstError) {
+    console.error("Safe shutdown blocked: unable to confirm hardware stop", firstError);
+    // Do not report success while real hardware status is uncertain.
+    process.exitCode = 1;
+    shutdownStarted = false;
+    return;
+  }
+  clearOperatorState();
   obsServer.close();
   iosBridge?.close();
   localAPI?.close();
   if (process.env.DG_DESKTOP_OFFLINE !== "1") {
-    try { bot.stop(signal); } catch (error) {
-      console.error("Telegram bot shutdown warning", error);
-    }
+    try { bot.stop(signal); } catch (error) { console.error("Telegram shutdown warning", error); }
   }
+  // This process is an owned app helper. Once all output has been stopped and
+  // device disconnect confirmed, exit explicitly rather than keeping polling
+  // / WebSocket / BLE library event-loop handles indefinitely alive.
+  process.exit(0);
 }
 
-process.once("SIGINT", () => { void shutdown("SIGINT"); });
-process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.on("SIGINT", () => { void shutdown("SIGINT"); });
+process.on("SIGTERM", () => { void shutdown("SIGTERM"); });

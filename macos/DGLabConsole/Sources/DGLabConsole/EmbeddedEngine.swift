@@ -127,31 +127,64 @@ final class EmbeddedEngine {
         } catch { model.errorMessage = "无法启动内置引擎：\(error.localizedDescription)" }
     }
 
-    func stop(model: ConsoleModel) async {
-        guard let child = process, child.isRunning else { model.serviceLabel = "内置引擎：已停止"; return }
-        guard !stopping else { return }
-        stopping = true
-        do {
-            // A fresh read from the real engine is mandatory: never trust stale UI.
-            let fresh = try await model.fetchSnapshot()
-            guard fresh.safeToRestart else {
-                throw NSError(domain: "DG-LAB", code: 423,
-                    userInfo: [NSLocalizedDescriptionKey: "设备或会话仍有输出，先点击立即停止并确认 A/B 双通道均归零。"])
-            }
-            child.interrupt() // existing Node SIGINT shutdown performs stop / disconnect
-            model.serviceLabel = "内置引擎：安全停止中"
-        } catch {
-            model.errorMessage = "拒绝停止引擎：\(error.localizedDescription)"
+    @discardableResult
+    func stop(model: ConsoleModel) async -> Bool {
+        guard let child = process, child.isRunning else {
+            model.serviceLabel = "内置引擎：已停止"
+            return true
         }
-        stopping = false
-    }
-
-    func mayQuit(model: ConsoleModel) -> Bool {
-        if !running { return true }
-        guard model.snapshot?.safeToRestart == true else { return false }
-        // Quit is guarded against active output in AppDelegate; backend receives
-        // SIGINT. Its watchdog also checks that the owning GUI stays alive.
-        process?.interrupt()
-        return true
+        guard !stopping else { return false }
+        stopping = true
+        defer { stopping = false }
+        model.serviceLabel = "内置引擎：正在停止声控、自动提升、会话和设备…"
+        do {
+            // Do not race a still-pending BLE scan. Let its command finish,
+            // then explicitly disconnect, even if the GUI timed out earlier.
+            if model.deviceConnecting {
+                for _ in 0..<44 {
+                    if !model.deviceConnecting { break }
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                guard !model.deviceConnecting else {
+                    throw NSError(domain: "DG-LAB", code: 408,
+                        userInfo: [NSLocalizedDescriptionKey: "蓝牙连接仍在执行，不能安全结束控制进程"])
+                }
+            }
+            // MUST await the actual shutdown ACK from the running backend.
+            // The command stops ramp, audio capture, session, zeroes strength
+            // and disconnects the device before signalling the Node process.
+            try await model.disconnectForShutdown()
+            let state = try await model.fetchSnapshot()
+            guard state.safeToRestart, state.device?.connected == false else {
+                throw NSError(domain: "DG-LAB", code: 423,
+                    userInfo: [NSLocalizedDescriptionKey: "未确认设备断开且 A/B 强度归零，拒绝停止引擎"])
+            }
+            child.terminate() // SIGTERM, Node stops its API/WebSocket/Telegram.
+            model.serviceLabel = "内置引擎：等待后台进程退出…"
+            for _ in 0..<80 {
+                if !child.isRunning { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if child.isRunning {
+                // Only after an ACK proving zero strength and disconnected BLE
+                // may an unresponsive Node event loop be force-terminated.
+                _ = kill(child.processIdentifier, SIGKILL)
+                for _ in 0..<20 {
+                    if !child.isRunning { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+            }
+            guard !child.isRunning else {
+                throw NSError(domain: "DG-LAB", code: 504,
+                    userInfo: [NSLocalizedDescriptionKey: "进程未退出，请检查后台进程状态"])
+            }
+            model.serviceLabel = "内置引擎：已停止（音频、自动提升、设备和 API 已关闭）"
+            model.appendEngineMessage("已确认设备断开并完成内置引擎停机")
+            return true
+        } catch {
+            model.errorMessage = "内置引擎停止失败：\(error.localizedDescription)"
+            model.serviceLabel = "内置引擎：停止失败，仍在运行"
+            return false
+        }
     }
 }

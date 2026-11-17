@@ -13,7 +13,7 @@ else
   BIN="$ROOT/.build/release/DGLabConsole"
 fi
 
-CACHE="$ROOT/.runtime-cache"
+CACHE="${DG_RUNTIME_CACHE_DIR:-$HOME/Library/Caches/DGLabConsole/Runtime}"
 for item in "$CACHE/bin/node" "$CACHE/bin/dglab-system-audio-meter" "$CACHE/Engine/dist/src/index.js" "$CACHE/Engine/node_modules"; do
   [[ -e "$item" ]] || { echo "Embedded runtime is missing: $item" >&2; exit 4; }
 done

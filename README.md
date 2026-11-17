@@ -236,3 +236,7 @@ launchd/                    macOS 服务模板
 ## 源码许可与安全
 
 项目使用 [MIT License](LICENSE)。DG-Lab、Telegram、iOS 和其他第三方商标属于各自权利人，本项目非官方软件。示例配置为占位符；个人 Token、Keychain 凭据、聊天记录、设备日志、已签名 IPA 和本机配置**不得提交**。即使软件限幅最高为 133，也不代表任何人体安全强度。
+
+### macOS Console v1.1.1 更新
+
+改进独立 App 的 1 秒状态刷新、设备连接超时与未连接提示、A/B 独立投票卡片、录屏授权系统设置入口及局域网说明，移除无实际使用场景的文件访问演示按钮。**关闭 App 不再直接中断 Node**：先等待设备停止/断开与状态验证，再结束引擎；失败时取消退出并显示错误。详细行为见 [macOS Console README](macos/DGLabConsole/README.md)。

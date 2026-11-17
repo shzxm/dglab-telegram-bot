@@ -63,3 +63,8 @@ curl -fsS -X POST http://127.0.0.1:8789/v1/command \
 安装 `DG-LAB Console.app` v1.1.0 后，点击「启动内置引擎」才会在 App 内启动 API 服务。无需先运行 `launchctl` 或另行启动旧 Bot。内置引擎可只在 `DG_DESKTOP_OFFLINE=1`（App 的「关闭 Telegram」选项）及 `mock` 模式运行，供首次权限检查和 UI 测试。
 
 引擎运行时 API 与 Telegram、iOS Bridge 共享一份 ControlSession，但**只有该 App 自己启动的一份 Node 子进程**负责设备。App 的「安全停止」会重新回读真实状态，只有会话、设备 A/B 均确认零输出时才请求子进程 SIGINT 停机。`/health` 不等于真实设备安全确认。
+
+
+## v1.1.1 应用停止与秒级刷新
+
+macOS SwiftUI 每秒自动 GET `/v1/status`，采用短超时及请求互斥，避免旧请求覆盖新状态。对于 `device.connect`（蓝牙发现最多 15 秒），GUI POST 超时延长至 40 秒并禁止重复连接。`session.disconnect` 保证停止自动提升和音频、停止或清理会话、断开设备并返回设备状态。App 关闭前等待这个 HTTP 回执，再次确认 A/B 为 0、设备 disconnected 后才终止自己的 Node 进程。未确认时撤销退出，而不是无条件杀死引擎。

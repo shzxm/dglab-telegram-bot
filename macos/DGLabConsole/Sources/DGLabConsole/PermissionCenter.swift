@@ -11,6 +11,7 @@ import UserNotifications
 /// databases or claim permissions that cannot be read reliably.
 @MainActor
 final class PermissionCenter: NSObject, ObservableObject, @preconcurrency CBCentralManagerDelegate {
+    static let shared = PermissionCenter()
     @Published private(set) var bluetooth = "尚未触发授权"
     @Published private(set) var microphone = "未确定"
     @Published private(set) var screen = "未确定"
@@ -21,6 +22,7 @@ final class PermissionCenter: NSObject, ObservableObject, @preconcurrency CBCent
     @Published var message = ""
 
     private var central: CBCentralManager?
+    private var audioTestProcess: Process?
 
     func refresh() {
         switch CBManager.authorization {
@@ -80,14 +82,19 @@ final class PermissionCenter: NSObject, ObservableObject, @preconcurrency CBCent
     }
 
     func requestScreen() {
-        if CGPreflightScreenCaptureAccess() { refresh(); return }
-        // CoreGraphics provides a dedicated macOS screen-recording permission
-        // request. On newer systems audio-only capture may be listed separately.
+        // CGRequestScreenCaptureAccess does not promise to open System Settings
+        // if permission was previously denied. Open the correct privacy pane
+        // explicitly as requested, then invoke the system's consent API.
+        openSettings("Privacy_ScreenCapture")
+        guard !CGPreflightScreenCaptureAccess() else {
+            message = "屏幕录制已授权，可在系统设置中确认。"
+            refresh()
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             _ = CGRequestScreenCaptureAccess()
             Task { @MainActor in
                 self?.refresh()
-                self?.message = "如果刚批准录屏，可能需要完全退出并重开 App 才会生效。"
             }
         }
     }
@@ -97,33 +104,48 @@ final class PermissionCenter: NSObject, ObservableObject, @preconcurrency CBCent
         audioTesting = true
         systemAudio = "正在请求系统音频录制权限…"
         let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/dglab-system-audio-meter")
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = ["--permission-test"]
+        let output = Pipe(), errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        do {
+            // Run is fast and nonblocking; retain the child synchronously so
+            // AppDelegate can stop it even when the macOS TCC sheet is open.
+            try process.run()
+            audioTestProcess = process
+        } catch {
+            audioTesting = false
+            systemAudio = "测试启动失败"
+            message = "无法启动录音权限测试：\(error.localizedDescription)"
+            return
+        }
         Task.detached { [weak self] in
-            let process = Process()
-            process.executableURL = helper
-            process.arguments = ["--permission-test"]
-            let output = Pipe(), errors = Pipe()
-            process.standardOutput = output
-            process.standardError = errors
-            do {
-                try process.run()
-                // Do not block the SwiftUI main thread while macOS displays a
-                // consent sheet. Test capture runs under a one-second stream.
-                process.waitUntilExit()
-                let stdout = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let err = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let ok = process.terminationStatus == 0 && stdout.contains("permission_test_ok")
-                await self?.completeAudioTest(ok: ok, errorText: ok ? "" : String(err.prefix(350)))
-            } catch {
-                await self?.completeAudioTest(ok: false, errorText: "无法运行内置音频授权测试：\(error.localizedDescription)")
-            }
+            process.waitUntilExit()
+            let stdout = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let err = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let ok = process.terminationStatus == 0 && stdout.contains("permission_test_ok")
+            await self?.completeAudioTest(process: process, ok: ok, errorText: ok ? "" : String(err.prefix(350)))
         }
     }
 
-    private func completeAudioTest(ok: Bool, errorText: String) {
+    private func completeAudioTest(process: Process, ok: Bool, errorText: String) {
+        guard audioTestProcess === process else { return }
+        audioTestProcess = nil
         systemAudio = ok ? "测试通过，系统音频可访问" : "未通过：请检查录屏与系统音频设置"
         if !ok { message = errorText }
         audioTesting = false
         refresh()
+    }
+
+    func stopAudioTest() {
+        if let child = audioTestProcess, child.isRunning { child.terminate() }
+        audioTestProcess = nil
+        if audioTesting {
+            audioTesting = false
+            systemAudio = "已随 App 退出取消录音权限测试"
+        }
     }
 
     func requestNotifications() {
@@ -149,8 +171,20 @@ final class PermissionCenter: NSObject, ObservableObject, @preconcurrency CBCent
     }
 
     func openSettings(_ section: String) {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(section)") {
-            NSWorkspace.shared.open(url)
+        // macOS 26+ uses the PrivacySecurity extension for deep links. The
+        // older com.apple.preference.security address is retained as a
+        // fallback for earlier supported macOS releases.
+        let candidates = [
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(section)",
+            "x-apple.systempreferences:com.apple.preference.security?\(section)"
+        ]
+        let opened = candidates.compactMap(URL.init(string:)).contains { NSWorkspace.shared.open($0) }
+        if opened {
+            message = "已打开系统设置的相关隐私权限页面。授权后返回本 App 点击刷新，必要时重启本 App。"
+        } else {
+            let app = URL(fileURLWithPath: "/System/Applications/System Settings.app")
+            _ = NSWorkspace.shared.open(app)
+            message = "已尝试打开系统设置。请手动进入 隐私与安全性 → 屏幕与系统音频录制（或相应权限）。"
         }
     }
 }

@@ -47,6 +47,10 @@ struct ConsoleWindow: View {
                         .foregroundStyle(model.connected ? .green : .orange)
                     Text(model.connected ? "本地 API 已连接" : "本地 API 未连接")
                         .font(.subheadline.weight(.medium))
+                    Label(model.snapshot?.device?.connected == true ? "设备已连接" : (model.connected ? "设备未连接" : "设备状态未知"),
+                          systemImage: model.snapshot?.device?.connected == true ? "link.circle.fill" : "link.badge.plus")
+                        .font(.caption)
+                        .foregroundStyle(model.snapshot?.device?.connected == true ? .green : .secondary)
                     Text(model.snapshot?.deviceMode?.uppercased() ?? "未知模式")
                         .font(.caption.monospaced()).foregroundStyle(.secondary)
                     Spacer()
@@ -148,8 +152,8 @@ private struct OverviewPage: View {
                 }
                 Divider()
                 HStack {
-                    Button("连接设备并归零") { confirmConnect = true }
-                        .disabled(!model.connected || state?.isActive == true)
+                    Button(model.deviceConnecting ? "设备连接中…" : "连接设备并归零") { confirmConnect = true }
+                        .disabled(!model.connected || state?.isActive == true || model.deviceConnecting || model.isWorking)
                     Button("停止并断开设备") { confirmDisconnect = true }
                         .disabled(!model.connected)
                     Spacer()
@@ -363,8 +367,6 @@ private struct TelegramPage: View {
     @EnvironmentObject private var model: ConsoleModel
     @State private var groupID = ""
     @State private var actionPool = "all"
-    @State private var voteChannel = "A"
-    @State private var voteWave = "imported_0"
 
     var body: some View {
         Text("Telegram 与直播活动").font(.largeTitle.bold())
@@ -413,33 +415,61 @@ private struct TelegramPage: View {
                 }
             }.padding(10)
         }
-        GroupBox("投票操作") {
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("投票通道", selection: $voteChannel) {
-                    Text("A").tag("A"); Text("B").tag("B")
-                }.pickerStyle(.segmented).frame(width: 190)
-                HStack {
-                    ForEach([-5, -3, -1, 1, 3, 5], id: \.self) { delta in
-                        Button(delta > 0 ? "+\(delta)" : "\(delta)") {
-                            model.command("vote.submit", payload: ["channel": voteChannel,
-                                "type": "strength_delta", "delta": delta])
-                        }
-                    }
-                }
-                HStack {
-                    Picker("波形投票", selection: $voteWave) {
-                        ForEach(waveforms, id: \.id) { item in Text(item.name).tag(item.id) }
-                    }.frame(width: 250)
-                    Button("提交波形投票") {
-                        model.command("vote.submit", payload: ["channel": voteChannel,
-                            "type": "waveform", "waveformId": voteWave])
-                    }
-                }
-                Text("Telegram 群成员身份、实际投票结算与直播操作队列由 Bot 端处理。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(10)
+        Text("A/B 双通道独立投票").font(.headline)
+        Text("两组按钮彼此独立。每轮 A/B 各自统计强度与波形票数；同一参与者在同一轮每个通道和类型只能投一次。")
+            .font(.caption).foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 14) {
+            VoteChannelCard(channel: "A")
+            VoteChannelCard(channel: "B")
         }
         .onAppear { actionPool = model.snapshot?.eventPool ?? "all" }
+    }
+}
+
+private struct VoteChannelCard: View {
+    @EnvironmentObject private var model: ConsoleModel
+    let channel: String
+    @State private var selectedWaveform = "imported_0"
+
+    private var voteCount: Int {
+        (model.snapshot?.votes ?? [:]).reduce(0) { value, entry in
+            value + (entry.key.hasPrefix("\(channel):") ? entry.value : 0)
+        }
+    }
+    private var active: Bool { model.snapshot?.isActive == true }
+
+    var body: some View {
+        GroupBox("\(channel) 通道投票") {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack {
+                    Text("\(channel) 通道强度投票").font(.headline)
+                    Spacer()
+                    Text("本轮累计：\(voteCount) 票")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
+                    ForEach([-5, -3, -1, 1, 3, 5], id: \.self) { delta in
+                        Button(delta > 0 ? "+\(delta)" : "\(delta)") {
+                            model.command("vote.submit", payload: ["channel": channel,
+                                "type": "strength_delta", "delta": delta])
+                        }.disabled(!active)
+                    }
+                }
+                Divider()
+                Picker("\(channel) 通道波形", selection: $selectedWaveform) {
+                    ForEach(waveforms, id: \.id) { option in
+                        Text(option.name).tag(option.id)
+                    }
+                }
+                Button("提交 \(channel) 通道波形投票") {
+                    model.command("vote.submit", payload: ["channel": channel,
+                        "type": "waveform", "waveformId": selectedWaveform])
+                }.disabled(!active)
+                Text("与另一通道分别统计，不会联动投票。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(10)
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
@@ -471,8 +501,8 @@ private struct APIPage: View {
                 HStack {
                     Button("启动内置引擎") { model.manageService("start") }
                         .disabled(model.embeddedEngine.running)
-                    Button("安全停止引擎") { confirmStopService = true }
-                        .disabled(!model.embeddedEngine.running || model.snapshot?.safeToRestart != true)
+                    Button("停止并断开所有控制") { confirmStopService = true }
+                        .disabled(!model.embeddedEngine.running || model.isWorking)
                 }
                 Text("内置引擎属于此 App，无需旧 LaunchAgent 或外部 Node.js。停止前重新读取设备与会话状态，若状态未知则拒绝。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -541,7 +571,7 @@ private struct APIPage: View {
         } message: { Text("连接或授权操作可能导致设备开始输出；请确认实体停止方式可立即使用。") }
         .confirmationDialog("安全停止 App 内置引擎？", isPresented: $confirmStopService) {
             Button("确认停止") { model.manageService("stop") }
-        } message: { Text("只有在会话和设备输出均为零时才允许停止内置引擎。") }
+        } message: { Text("会先尝试停止当前设备输出和所有控制，验证设备断开后退出引擎。失败时保留进程并提示处理。") }
     }
 
     private func sendCommand() {

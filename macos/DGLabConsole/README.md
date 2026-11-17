@@ -17,7 +17,7 @@ App **不依赖** Homebrew Node.js、单独的 `com.dglab.telegram-bot` LaunchAg
 - **双通道自动提升**：间隔 1–60 秒、本轮累计提升 +1 至 +33 级后停止，A/B 分别设置、倒数和进度。
 - **声音响应**：系统音频音量和节拍模式可单独或同时启用；固定频率、常见区间及自定义 1–100 Hz。
 - **Telegram 多人协作**：邀请码、群绑定、投票、活动队列、抽选与动作池。Telegram 选项关闭后，**本地 Mock/控制面板仍可以工作**，无需 Bot Token。
-- **系统权限中心**：蓝牙、屏幕录制、系统音频捕获测试、麦克风、局域网设置、通知、文件选择及可选辅助功能。明确提示授权状态，不绕过 macOS TCC。
+- **系统权限中心**：蓝牙、屏幕录制、系统音频捕获测试、麦克风、局域网设置、通知及可选辅助功能。明确提示授权状态，不绕过 macOS TCC。
 - **OBS 与 API**：`127.0.0.1:8787/obs`、`127.0.0.1:8789/v1/status|capabilities|command`；手机 WebSocket 端口默认 8788。Bearer 鉴权，连接设备/启动输出需要二次确认。
 
 ## 安全边界
@@ -40,7 +40,7 @@ cd macos/DGLabConsole
 open "$HOME/Library/Caches/DGLabConsole/Release/DG-LAB Console.app"
 ```
 
-`prepare-runtime.sh` 使用**固定 SHA-256 验证** Node.js 24.13.0 官方 ARM64 二进制，安装生产依赖、编译原本 TypeScript 与系统音频助手。编译产物在 `.runtime-cache/`，不会提交到仓库。完整 `.app` 包括 `Contents/MacOS/DGLabConsole`、`Contents/Helpers/node`、`Contents/Helpers/dglab-system-audio-meter`、`Contents/Resources/Engine`。
+`prepare-runtime.sh` 使用**固定 SHA-256 验证** Node.js 24.13.0 官方 ARM64 二进制，安装生产依赖、编译原本 TypeScript 与系统音频助手。运行时编译缓存默认位于 `~/Library/Caches/DGLabConsole/Runtime/`（不在文件同步目录内），不会提交到仓库。完整 `.app` 包括 `Contents/MacOS/DGLabConsole`、`Contents/Helpers/node`、`Contents/Helpers/dglab-system-audio-meter`、`Contents/Resources/Engine`。
 
 MBP 如果只有 Command Line Tools 而没有完整 Xcode，可以在另一台有完整 Xcode 的 Mac 编译图形可执行程序，然后在 MBP 用 `DG_GUI_BINARY=/path/to/DGLabConsole ./Scripts/build-app.sh` 把自己的内置运行时一起打包。
 
@@ -55,3 +55,15 @@ iOS App [dglab-ios](https://github.com/shzxm/dglab-ios) 可选择完全独立蓝
 本 App 的源代码采用仓库的 MIT License。完整安装包还包含 Node.js 24 官方运行时（含第三方组件许可通知）及若干生产版 npm 包。`prepare-runtime.sh` 会将官方 Node.js 的许可证提取到 App 的 `Contents/Resources/Engine/NODEJS_LICENSE.txt`，npm 依赖各自的许可证文件保留在相应 `node_modules` 内。发布或二次分发必须保留这些文件。
 
 为防止 iCloud/文件提供程序自动给源码目录中的 `.app` 添加 FinderInfo 扩展属性而破坏签名，`build-app.sh` 默认将可验证的输出放在 `~/Library/Caches/DGLabConsole/Release/DG-LAB Console.app`。也可通过 `DG_APP_OUTPUT_DIR` 指定非同步磁盘目录。发布前请先用 `codesign --verify --deep --strict` 检查完整包。
+
+## v1.1.1 状态、权限与退出修正（2026-11-17）
+
+- **设备连接**：连接请求等待时间长于 15 秒蓝牙扫描窗口，避免把正常搜索误报为 App 的 7 秒请求超时。连接失败在主界面显示「设备未连接」，详细原因保留在最近操作日志；未完成扫描时禁止重复连接。
+- **设备刷新**：状态每 **1 秒**重新查询一次（GET 超时 2.5 秒），前一次请求尚未结束则不重叠；未接通的真实设备和 API 断线分别显示。
+- **A/B 投票**：界面是 A/B 两套独立投票卡片，每套都有独立强度 ±1/±3/±5、波形选择、实时票数。
+- **权限**：「申请录屏」会打开系统设置中的录屏授权页面并发起操作系统的申请；「局域网 → 查看说明」立即弹出独立说明窗。原「文件选择」仅为演示，并非 DG-LAB 功能，因此已经从权限页移除。
+- **内置引擎停止/退出**：点击停止或正常退出 App（含最后窗口关闭）会**先发送 `session.disconnect` 并等待确认**：停止声控与自动提升、结束当前会话、归零及断开设备；随后回读会话与设备状态，确认 A/B 均为零且设备已断开，才通知内置 Node 退出并等待进程结束。如果设备失联、API 不回应或结果不确定，App 会取消本次退出并保留控制界面给用户处理，不能用一条本地“退出成功”消息替代硬件安全证明。
+
+**注意**：应用内的数值归零不等于在网络/蓝牙失联后实体设备一定执行了归零，仍必须准备独立硬件停止方式。
+
+- 系统音频权限测试助手现在归 App 生命周期管理，正常退出时会主动终止此独立测试进程。授权界面由 macOS TCC 决定，应用不能代替用户点击批准。
