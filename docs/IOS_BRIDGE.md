@@ -50,3 +50,8 @@
 动态调整间隔不会重置累计次数；完成指定自动 +1 次数或先达到通道强度上限后自动停止。`audio.range` 支持任意 `1 <= minHz <= maxHz <= 100` 的整数端点，例如 5–88 Hz，固定频率使用相等端点。
 
 **协作角色对照**见 [ARCHITECTURE.md](ARCHITECTURE.md)，**安全边界**见 [SECURITY.md](SECURITY.md)，**iOS App** 见 <https://github.com/shzxm/dglab-ios>。
+
+
+## macOS 原生 GUI / REST API 的区别
+
+macOS 本机另有 [DG-LAB Console](../macos/DGLabConsole/README.md)，使用 **127.0.0.1:8789** 的 HTTP Bearer API（[REST 文档](LOCAL_CONTROL_API.md)），不会对外开放该端口。iOS App 则继续使用本项目独立的 WebSocket 桥接端口（默认 8788）。**两套接口都使用同一份高熵桥接密钥和同一个 ControlSession，但协议和默认监听地址不同**；不会启动两个 Telegram Bot 实例。

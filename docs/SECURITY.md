@@ -17,3 +17,10 @@
 ## 负责任披露
 
 对凭证泄露、未经授权控制、停止失效等安全问题，请通过 GitHub 仓库的私密漏洞披露渠道（如已开启）或其他私密渠道联系维护者。不要在公开 Issue 附上真实密钥、聊天记录或设备位置。
+
+
+## macOS GUI / 本地 API
+
+macOS GUI 不持有 BotFather Token；仅从 Keychain 读取或保存单独的 `IOS_BRIDGE_TOKEN`，经 `http://127.0.0.1:8789` 调用带 Bearer 的本地控制 API。API 固定只监听回环，不支持公开地址；禁止跨源 Origin 请求、过滤命令白名单、限制每秒调用次数。调用 `device.connect` / `session.arm` 时必须额外带明确确认头，GUI 提供现场确认框。
+
+GUI 的 LaunchAgent 重启/停止按钮会现场重新读取 API 状态，仅在会话 inactive 且设备与会话两套 A/B 强度都为 0 时执行；无法获取状态时拒绝操作。即便软件显示已归零，也不能代替实体硬件安全停止。

@@ -43,3 +43,20 @@ sequenceDiagram
 桥接控制帧使用 JSON，经高熵 `IOS_BRIDGE_TOKEN` Bearer 授权；**手机端密钥不是 Telegram 用户身份**，拥有者应将其视为管理员凭证。默认不对 LAN 或公网监听，需明确配置 `IOS_BRIDGE_HOST`。
 
 详细协议： [IOS_BRIDGE.md](IOS_BRIDGE.md)。安全约束： [SECURITY.md](SECURITY.md)。
+
+
+## macOS 原生控制台与本地 HTTP API
+
+除了 Telegram 群聊和 iOS App，现在还提供 [macOS SwiftUI 控制台](../macos/DGLabConsole/README.md)。它不创建新的 Telegram Bot，不单独操控蓝牙，而是使用与 iOS Bridge 同一份独立密钥连接 **127.0.0.1:8789** 的本地 API，复用 Bot 的真实会话状态、设备、波形和音频逻辑。服务与界面独立运行，关闭 GUI 不会关闭后台 Bot。
+
+```mermaid
+flowchart LR
+  UI[macOS SwiftUI App] -->|127.0.0.1:8789 / Bearer| API[本地 HTTP 控制 API]
+  TELE[Telegram Bot] --> SESSION[共享控制会话]
+  IOS[iPhone App] -->|WebSocket 8788 / Bearer| BRIDGE[iOS Bridge]
+  API --> SESSION
+  BRIDGE --> SESSION
+  SESSION --> BACK[设备驱动: mock / macOS BLE / iPhone BLE]
+```
+
+本地 API 仅绑定 loopback；未经认证无法查询会话状态或修改设备。修改会话授权和连接设备需要明确确认请求头，停止会话不受普通 API 限速。详情见 [LOCAL_CONTROL_API.md](LOCAL_CONTROL_API.md)。

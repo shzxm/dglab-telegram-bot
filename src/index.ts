@@ -9,6 +9,7 @@ import { startObsOverlay } from "./obs-overlay.js";
 import { AutoRampController } from "./auto-ramp.js";
 import { IOSBridgeServer, type IOSBridgeSnapshot } from "./ios-bridge.js";
 import { IOSRelayDevice } from "./ios-relay-device.js";
+import { LocalControlAPI } from "./local-control-api.js";
 import { SystemAudioReactiveController, AUDIO_FREQUENCY_RANGES, type AudioMode, type AudioTarget, type FrequencyRange } from "./audio-reactive.js";
 
 const config = loadConfig(process.env);
@@ -29,6 +30,21 @@ const iosBridge: IOSBridgeServer | null = iosToken ? new IOSBridgeServer(iosToke
 if (config.deviceMode === "ios" && !iosBridge) throw new Error("DG_DEVICE_MODE=ios requires IOS_BRIDGE_TOKEN");
 const iosRelayDevice: IOSRelayDevice | null = config.deviceMode === "ios" && iosBridge ? new IOSRelayDevice(iosBridge) : null;
 const device = config.deviceMode === "ble" ? new CoyoteV2Device() : iosRelayDevice ?? new MockDevice();
+// No second Telegram poller: native macOS controls reuse the exact same session
+// and BLE device. Loopback-only REST is optional and shares the bridge credential.
+const localAPI = iosToken ? new LocalControlAPI(iosToken, {
+  snapshot: async () => ({
+    ...iosSnapshot(),
+    sessionState: session?.snapshot().state ?? "none",
+    device: await device.getStatus(),
+    deviceMode: config.deviceMode,
+    audioVolume: audioReactive.isEnabled("volume"),
+    audioBeat: audioReactive.isEnabled("beat"),
+    audioTarget, audioMinHz: audioRange.minHz, audioMaxHz: audioRange.maxHz,
+    strengthLimit, obsURL: `http://127.0.0.1:${obsPort}/obs`,
+  }),
+  command: iosOwnerCommand,
+}) : null;
 
 let session: ControlSession | null = null;
 let inviteCode = "";
@@ -416,6 +432,13 @@ async function iosOwnerCommand(name: string, payload: Record<string, unknown>): 
   };
   switch (name) {
   case "status": return iosSnapshot() as unknown as Record<string, unknown>;
+  case "device.status": return { ...iosSnapshot(), device: await device.getStatus() };
+  case "device.connect": {
+    if (session?.snapshot().state === "active") throw new Error("Stop the session before connecting");
+    await device.connect();
+    await device.emergencyStop();
+    return { ...iosSnapshot(), device: await device.getStatus(), message: "Device connected and zeroed" };
+  }
   case "session.create": {
     if (session?.snapshot().state === "active") throw new Error("Stop the current session before creating another");
     const mode = payload.mode;
@@ -469,6 +492,14 @@ async function iosOwnerCommand(name: string, payload: Record<string, unknown>): 
     if (autoRamp.isEnabled(channel)) autoRamp.stop(channel);
     else { active(); startAutoRamp(channel); }
     return { ...iosSnapshot(), message: `${channel} ramp ${autoRamp.isEnabled(channel) ? "ON" : "OFF"}` };
+  }
+  case "audio.off": stopAudioReactive(); return { ...iosSnapshot(), message: "Audio stopped" };
+  case "audio.target": {
+    const target = payload.target;
+    if (target !== "A" && target !== "B" && target !== "both") throw new Error("Invalid audio target");
+    audioTarget = target;
+    audioReactive.updateSettings(audioTarget, audioRange);
+    return { ...iosSnapshot(), message: `Audio target: ${target}` };
   }
   case "audio.volume": active(); toggleAudioReactive("volume"); return { ...iosSnapshot(), message: "Audio volume toggled" };
   case "audio.beat": active(); toggleAudioReactive("beat"); return { ...iosSnapshot(), message: "Audio beat toggled" };
@@ -807,6 +838,11 @@ bot.on("callback_query", async (ctx) => {
 
 bot.catch((error) => { console.error("Telegram handler error", error); });
 
+if (localAPI) {
+  const apiPort = Number(process.env.DG_LOCAL_API_PORT ?? "8789");
+  localAPI.listen(apiPort);
+}
+
 if (iosBridge) {
   const host = (process.env.IOS_BRIDGE_HOST ?? "127.0.0.1").trim();
   const port = Number(process.env.IOS_BRIDGE_PORT ?? "8788");
@@ -843,6 +879,7 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   await device.disconnect().catch(() => undefined);
   obsServer.close();
   iosBridge?.close();
+  localAPI?.close();
   bot.stop(signal);
 }
 

@@ -48,6 +48,15 @@ flowchart TD
 
 **两条 BLE 线路互斥。** `ios` 模式需要 iPhone 本地再次确认授权，不能用 iPhone 的桥接密钥绕过手机本地限幅。完整关系、协议和部署说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/IOS_BRIDGE.md](docs/IOS_BRIDGE.md)。
 
+## macOS 原生控制台（SwiftUI）
+
+本仓库同时提供 [DG-LAB macOS Console](macos/DGLabConsole/README.md)，将现有 Bot 的设备、A/B 强度与波形、自动提升、系统音频、群聊投票/活动、OBS 和本地 API 统一到一个简洁窗口。**只使用已有 Bot 的一个后台进程，不重复登录 Telegram，也不重复占用蓝牙。**
+
+- 本地控制 API：`http://127.0.0.1:8789`，仅回环地址、Bearer 鉴权、操作白名单；详细说明见 [docs/LOCAL_CONTROL_API.md](docs/LOCAL_CONTROL_API.md)。
+- App 启动时尝试从 macOS Keychain 读取现有 iOS 桥接密钥，也可以在 App 中手动输入并存入自己的 Keychain。
+- macOS App 可安全管理已有 LaunchAgent：只有确认会话未激活、设备 A/B 都归零才允许停止或重启后台。
+- MBP 本机不装完整 Xcode 时，可在另一台 Mac 用完整 Xcode 编译 `.app`，复制回 MBP 直接运行。
+
 ## 环境要求
 
 - macOS，具备蓝牙硬件（真实 Mac BLE 模式），Node.js **20+**、npm；建议使用已登录桌面的用户运行。
@@ -197,7 +206,7 @@ launchd/                    macOS 服务模板
 
 ## 测试与现有局限
 
-- `npm run typecheck && npm test && npm run build` 运行 Mock / 无实体设备测试。2026-11-16 已验证 **31 项 Vitest 测试通过**。
+- `npm run typecheck && npm test && npm run build` 运行 Mock / 无实体设备测试。2026-11-17 已验证 **36 项 Vitest 测试通过**。
 - `iOS` 远程蓝牙主机协议和 CoreBluetooth 目前**未完成 iPhone 实物验收**；不能因为桥接测试通过就保证实际停止/归零消息一定能送达硬件。
 - `133` 是软件上限，不能用来推断人体耐受或医疗用途。
 - 如果要参与开发，请提交可复现的 Mock 测试与最小变更，不要上传 Token、家庭网络配置或聊天记录。更多说明见 [docs/SECURITY.md](docs/SECURITY.md)。
