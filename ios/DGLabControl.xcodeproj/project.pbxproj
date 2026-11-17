@@ -1,0 +1,535 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0023183837700ECC198AA371 /* RampBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F27F66E44E9E9C3974B7DA1 /* RampBudget.swift */; };
+		06E71D78B7B74C539DB8049D /* TelegramRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61737ECA2F5E4AE69A0499B8 /* TelegramRelay.swift */; };
+		3856591E70D084DE466D2234 /* DGLabCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B5B6A739358F2092790FC46D /* DGLabCore.framework */; };
+		473DBBB5A8FD71A0A064E9C5 /* BLEHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD362343030DF21A5463A132 /* BLEHost.swift */; };
+		632B75A059BBC6A519A1965A /* TelegramViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C13C3813A766DEAFB4390383 /* TelegramViews.swift */; };
+		667DB4756E6AE674D8D128D1 /* DGLabControlApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B7994CA391267DF690C283B /* DGLabControlApp.swift */; };
+		6694EA57AAFE258E14D4621D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BF29A079D9DE2CF816DA24CB /* Assets.xcassets */; };
+		6FA92F590273BA7DF00CFFCB /* VoteEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06DF77E8747EBC8DA5AA7C57 /* VoteEngine.swift */; };
+		85B83290119BE1E371F7EE54 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4F8CD093867D3EEEDC51C8C /* Views.swift */; };
+		8609A6EC8B10FD63936D7889 /* AudioMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5349C3A35BE426D20B479A7 /* AudioMapper.swift */; };
+		908FAD84BEE5B31BC867FBB8 /* FrequencyRangeSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9239A7BE6FDD7D138BA6C3E /* FrequencyRangeSlider.swift */; };
+		93B548C41C5E482A2A52F49F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D87CD07EE3EB24A0BF6537F /* Models.swift */; };
+		A907BA9D7242369C6C09AB03 /* DGLabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43A64F906458C0FC7DA88068 /* DGLabController.swift */; };
+		B87F238B7D9409A8EEA96140 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD030CC29C7A8C9CC425FB82 /* SafetyEngine.swift */; };
+		CB06977C034550E378E3257F /* V2Codec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF913E8B160FC8B53905298 /* V2Codec.swift */; };
+		CFDBA0925CC98A6B28565C7F /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3A9A8C21D0A120A08FDB4A /* AudioCapture.swift */; };
+		E986E0D61DBBB25E82BF68CD /* DGLabCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B5B6A739358F2092790FC46D /* DGLabCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		F08CC11FE613738253F2BCD8 /* Waveforms.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46DFD56F12009C7A7307EA2F /* Waveforms.generated.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A55DD1785EC2E10BC2CF962D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B54E95E67A2611F17A189153 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 88587E32056A54AE09DEC703;
+			remoteInfo = DGLabCore;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		153FC847F2AC5B0BAC7A3C3B /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				E986E0D61DBBB25E82BF68CD /* DGLabCore.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		06DF77E8747EBC8DA5AA7C57 /* VoteEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoteEngine.swift; sourceTree = "<group>"; };
+		2F3A9A8C21D0A120A08FDB4A /* AudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCapture.swift; sourceTree = "<group>"; };
+		3B7994CA391267DF690C283B /* DGLabControlApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DGLabControlApp.swift; sourceTree = "<group>"; };
+		43A64F906458C0FC7DA88068 /* DGLabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DGLabController.swift; sourceTree = "<group>"; };
+		46DFD56F12009C7A7307EA2F /* Waveforms.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Waveforms.generated.swift; sourceTree = "<group>"; };
+		4F27F66E44E9E9C3974B7DA1 /* RampBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RampBudget.swift; sourceTree = "<group>"; };
+		61737ECA2F5E4AE69A0499B8 /* TelegramRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramRelay.swift; sourceTree = "<group>"; };
+		8D87CD07EE3EB24A0BF6537F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A4F8CD093867D3EEEDC51C8C /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
+		A9239A7BE6FDD7D138BA6C3E /* FrequencyRangeSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyRangeSlider.swift; sourceTree = "<group>"; };
+		AFF913E8B160FC8B53905298 /* V2Codec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Codec.swift; sourceTree = "<group>"; };
+		B5B6A739358F2092790FC46D /* DGLabCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = DGLabCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		BD362343030DF21A5463A132 /* BLEHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEHost.swift; sourceTree = "<group>"; };
+		BF29A079D9DE2CF816DA24CB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		BFA9C1996DC49856B2B884C5 /* DGLabControl.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DGLabControl.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0B0B16EB703B1DC24FB93B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C13C3813A766DEAFB4390383 /* TelegramViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramViews.swift; sourceTree = "<group>"; };
+		C5349C3A35BE426D20B479A7 /* AudioMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMapper.swift; sourceTree = "<group>"; };
+		DD030CC29C7A8C9CC425FB82 /* SafetyEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyEngine.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		79A158B25ED9812B7B8FE44C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3856591E70D084DE466D2234 /* DGLabCore.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2D0FFF1F0883C757A56A18EE = {
+			isa = PBXGroup;
+			children = (
+				B412FA3C7DD3BC159EB00744 /* DGLabControl */,
+				BC84F6EEF9D815D97985C2C7 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9A353CD5061A24AA6EC20316 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				BF29A079D9DE2CF816DA24CB /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		B412FA3C7DD3BC159EB00744 /* DGLabControl */ = {
+			isa = PBXGroup;
+			children = (
+				BAE2BD8BA77A0AFE629C38F7 /* App */,
+				FCEC4CAECA1AAAF972DEA7D3 /* Core */,
+				9A353CD5061A24AA6EC20316 /* Resources */,
+			);
+			path = DGLabControl;
+			sourceTree = "<group>";
+		};
+		BAE2BD8BA77A0AFE629C38F7 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				2F3A9A8C21D0A120A08FDB4A /* AudioCapture.swift */,
+				BD362343030DF21A5463A132 /* BLEHost.swift */,
+				3B7994CA391267DF690C283B /* DGLabControlApp.swift */,
+				43A64F906458C0FC7DA88068 /* DGLabController.swift */,
+				A9239A7BE6FDD7D138BA6C3E /* FrequencyRangeSlider.swift */,
+				61737ECA2F5E4AE69A0499B8 /* TelegramRelay.swift */,
+				C13C3813A766DEAFB4390383 /* TelegramViews.swift */,
+				A4F8CD093867D3EEEDC51C8C /* Views.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		BC84F6EEF9D815D97985C2C7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				BFA9C1996DC49856B2B884C5 /* DGLabControl.app */,
+				B5B6A739358F2092790FC46D /* DGLabCore.framework */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		FCEC4CAECA1AAAF972DEA7D3 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				C5349C3A35BE426D20B479A7 /* AudioMapper.swift */,
+				C0B0B16EB703B1DC24FB93B6 /* Info.plist */,
+				8D87CD07EE3EB24A0BF6537F /* Models.swift */,
+				4F27F66E44E9E9C3974B7DA1 /* RampBudget.swift */,
+				DD030CC29C7A8C9CC425FB82 /* SafetyEngine.swift */,
+				AFF913E8B160FC8B53905298 /* V2Codec.swift */,
+				06DF77E8747EBC8DA5AA7C57 /* VoteEngine.swift */,
+				46DFD56F12009C7A7307EA2F /* Waveforms.generated.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0C28ACE9CD89C0854EE889C0 /* DGLabControl */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3DD2B655F92D3F8546034358 /* Build configuration list for PBXNativeTarget "DGLabControl" */;
+			buildPhases = (
+				F6513DE256DC7F56198025D0 /* Sources */,
+				56AEAFAC88406CFC9DD55C6F /* Resources */,
+				79A158B25ED9812B7B8FE44C /* Frameworks */,
+				153FC847F2AC5B0BAC7A3C3B /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				116193FE2717CCFE6CF1EE8B /* PBXTargetDependency */,
+			);
+			name = DGLabControl;
+			packageProductDependencies = (
+			);
+			productName = DGLabControl;
+			productReference = BFA9C1996DC49856B2B884C5 /* DGLabControl.app */;
+			productType = "com.apple.product-type.application";
+		};
+		88587E32056A54AE09DEC703 /* DGLabCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FE7A60BFC97680A1DAF39BBA /* Build configuration list for PBXNativeTarget "DGLabCore" */;
+			buildPhases = (
+				51CF0F3F586B968AE3FE8CF3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DGLabCore;
+			packageProductDependencies = (
+			);
+			productName = DGLabCore;
+			productReference = B5B6A739358F2092790FC46D /* DGLabCore.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B54E95E67A2611F17A189153 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					0C28ACE9CD89C0854EE889C0 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = DE4E73524D79DDD316DD093A /* Build configuration list for PBXProject "DGLabControl" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2D0FFF1F0883C757A56A18EE;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = BC84F6EEF9D815D97985C2C7 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				88587E32056A54AE09DEC703 /* DGLabCore */,
+				0C28ACE9CD89C0854EE889C0 /* DGLabControl */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		56AEAFAC88406CFC9DD55C6F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6694EA57AAFE258E14D4621D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		51CF0F3F586B968AE3FE8CF3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8609A6EC8B10FD63936D7889 /* AudioMapper.swift in Sources */,
+				93B548C41C5E482A2A52F49F /* Models.swift in Sources */,
+				0023183837700ECC198AA371 /* RampBudget.swift in Sources */,
+				B87F238B7D9409A8EEA96140 /* SafetyEngine.swift in Sources */,
+				CB06977C034550E378E3257F /* V2Codec.swift in Sources */,
+				6FA92F590273BA7DF00CFFCB /* VoteEngine.swift in Sources */,
+				F08CC11FE613738253F2BCD8 /* Waveforms.generated.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F6513DE256DC7F56198025D0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CFDBA0925CC98A6B28565C7F /* AudioCapture.swift in Sources */,
+				473DBBB5A8FD71A0A064E9C5 /* BLEHost.swift in Sources */,
+				667DB4756E6AE674D8D128D1 /* DGLabControlApp.swift in Sources */,
+				A907BA9D7242369C6C09AB03 /* DGLabController.swift in Sources */,
+				908FAD84BEE5B31BC867FBB8 /* FrequencyRangeSlider.swift in Sources */,
+				06E71D78B7B74C539DB8049D /* TelegramRelay.swift in Sources */,
+				632B75A059BBC6A519A1965A /* TelegramViews.swift in Sources */,
+				85B83290119BE1E371F7EE54 /* Views.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		116193FE2717CCFE6CF1EE8B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 88587E32056A54AE09DEC703 /* DGLabCore */;
+			targetProxy = A55DD1785EC2E10BC2CF962D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		10DC8987478331825875C28C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		47288B9E3A9A67E9FBA3A743 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = DGLabControl/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shzxm.DGLabControl;
+				PRODUCT_NAME = DGLabControl;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		5EBDE5FDCCB073934F38D984 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = DGLabControl/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shzxm.DGLabControl;
+				PRODUCT_NAME = DGLabControl;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A36BF1B0515C83D27DCA8770 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D73C653406461156B51C0C12 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				INFOPLIST_FILE = DGLabControl/Core/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shzxm.DGLabControlCore;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		DFA2B8103A18A2C3836F9EDD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				INFOPLIST_FILE = DGLabControl/Core/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shzxm.DGLabControlCore;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3DD2B655F92D3F8546034358 /* Build configuration list for PBXNativeTarget "DGLabControl" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5EBDE5FDCCB073934F38D984 /* Debug */,
+				47288B9E3A9A67E9FBA3A743 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DE4E73524D79DDD316DD093A /* Build configuration list for PBXProject "DGLabControl" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				10DC8987478331825875C28C /* Debug */,
+				A36BF1B0515C83D27DCA8770 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FE7A60BFC97680A1DAF39BBA /* Build configuration list for PBXNativeTarget "DGLabCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DFA2B8103A18A2C3836F9EDD /* Debug */,
+				D73C653406461156B51C0C12 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B54E95E67A2611F17A189153 /* Project object */;
+}

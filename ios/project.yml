@@ -1,0 +1,76 @@
+name: DGLabControl
+options:
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: 2.46.0
+  bundleIdPrefix: com.shzxm
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    IPHONEOS_DEPLOYMENT_TARGET: '27.0'
+    SUPPORTS_MACCATALYST: 'NO'
+    TARGETED_DEVICE_FAMILY: '1,2'
+    CLANG_ENABLE_MODULES: 'YES'
+    ENABLE_USER_SCRIPT_SANDBOXING: 'YES'
+    SWIFT_EMIT_LOC_STRINGS: 'YES'
+targets:
+  DGLabCore:
+    type: framework
+    platform: iOS
+    sources:
+      - DGLabControl/Core
+    info:
+      path: DGLabControl/Core/Info.plist
+      properties:
+        CFBundleName: DGLabCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shzxm.DGLabControlCore
+        DEFINES_MODULE: 'YES'
+        SKIP_INSTALL: 'YES'
+  DGLabControl:
+    type: application
+    platform: iOS
+    sources:
+      - DGLabControl/App
+      - DGLabControl/Resources
+    dependencies:
+      - target: DGLabCore
+        embed: true
+    info:
+      path: DGLabControl/Info.plist
+      properties:
+        CFBundleDisplayName: DG-LAB
+        CFBundleURLTypes:
+          - CFBundleURLName: org.dglabcontrol.app.open
+            CFBundleURLSchemes: [dglabcontrol]
+        CFBundleShortVersionString: '$(MARKETING_VERSION)'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
+        UILaunchScreen: {}
+        UIApplicationSupportsDocumentBrowser: false
+        NSBluetoothAlwaysUsageDescription: 此应用需要通过蓝牙连接 DG-LAB 2 代设备。
+        NSMicrophoneUsageDescription: 仅在你开启声音响应后分析实时音量，不保存录音。
+        NSLocalNetworkUsageDescription: 连接局域网内的 DG-LAB Telegram Bot 控制桥接服务。
+        UIStatusBarStyle: UIStatusBarStyleDefault
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shzxm.DGLabControl
+        PRODUCT_NAME: DGLabControl
+        MARKETING_VERSION: '1.1.0'
+        CURRENT_PROJECT_VERSION: '2'
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_VERSION: '5.0'
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ''
+        ENABLE_PREVIEWS: 'YES'
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities

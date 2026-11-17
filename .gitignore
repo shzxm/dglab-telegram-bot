@@ -12,3 +12,17 @@ bin/system-audio-meter
 
 # Private local operation notes (not part of the public project)
 控制命令说明.md
+
+# Native iOS build output and local signing data
+ios/.build/
+ios/.swiftpm/
+ios/DerivedData/
+ios/Builds/
+ios/**/*.xcuserstate
+ios/**/xcuserdata/
+ios/**/*.xcresult/
+ios/**/*.ipa
+ios/**/*.mobileprovision
+ios/**/*.p12
+ios/**/*.p8
+ios/*.log

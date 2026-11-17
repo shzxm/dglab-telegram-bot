@@ -205,3 +205,22 @@ launchd/                    macOS 服务模板
 ## 许可
 
 [MIT License](LICENSE)。本项目与 DG-LAB 官方没有隶属、背书或认证关系。
+
+## 原生 iOS App（本仓库新增）
+
+完整的 SwiftUI 项目已收录在 [ios/](ios/)。可通过 Xcode 27.2、XcodeGen 和自己的开发者证书编译安装，不需要 App Store 上架。支持 V2 BLE 连接、双通道手动控制、独立上限、1–60 秒自动提升间隔、+1 至 +33 的停止阈值、双端节拍区间滑杆，以及经独立随机密钥保护的 Telegram WebSocket 桥接。实际手机与硬件需要自行验收。
+
+## 与药时 PK Atlas 跨应用互动
+
+另一个独立项目：[药时 · PK Atlas](https://github.com/shzxm/pk-atlas)，包含 Web/PWA 和 SwiftUI iOS App。
+
+- 在本 iOS App **设置 → 打开药时**，主动打开 pkatlas://open?source=dglab。
+- 在药时 iOS **更多 → 打开 DG-LAB 控制台**，主动打开 dglabcontrol://open?source=pkatlas。
+- 两个方向只切换应用前台，不传递服药记录、账号、强度、频率、WebSocket 凭证或电刺激命令。
+- **不存在药代数值自动控制 DG-Lab 的功能。** URL 唤起绝不会自动授权或启动设备。
+
+详细协议和风险说明：[docs/PK_ATLAS_INTEROPERABILITY.md](docs/PK_ATLAS_INTEROPERABILITY.md)。
+
+## 源码许可与安全
+
+项目使用 [MIT License](LICENSE)。DG-Lab、Telegram、iOS 和其他第三方商标属于各自权利人，本项目非官方软件。示例配置为占位符；个人 Token、Keychain 凭据、聊天记录、设备日志、已签名 IPA 和本机配置**不得提交**。即使软件限幅最高为 133，也不代表任何人体安全强度。
