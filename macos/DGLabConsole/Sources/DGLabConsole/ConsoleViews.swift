@@ -32,6 +32,14 @@ private let waveforms: [(id: String, name: String)] = [
 struct ConsoleWindow: View {
     @EnvironmentObject private var model: ConsoleModel
     @State private var selection: Page? = .overview
+    private enum StartPrompt { case switchOld, startReal }
+    @State private var pendingStartPrompt: StartPrompt?
+
+    private func launchFromHeader() {
+        if model.legacyRunning { pendingStartPrompt = .switchOld }
+        else if model.selectedDeviceMode != "mock" { pendingStartPrompt = .startReal }
+        else { model.manageService("start") }
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -54,6 +62,16 @@ struct ConsoleWindow: View {
                     Text(model.snapshot?.deviceMode?.uppercased() ?? "未知模式")
                         .font(.caption.monospaced()).foregroundStyle(.secondary)
                     Spacer()
+                    if !model.embeddedEngine.running {
+                        Button(model.legacyRunning ? "安全切换旧后台" : "启动控制引擎") {
+                            launchFromHeader()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isWorking)
+                    } else {
+                        Label("内置引擎运行中", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
                     if let state = model.snapshot {
                         Text("A \(state.strengthA ?? 0)  /  B \(state.strengthB ?? 0)")
                             .font(.subheadline.monospacedDigit())
@@ -100,6 +118,18 @@ struct ConsoleWindow: View {
             }
             .navigationTitle(selection?.rawValue ?? "控制台")
         }
+        .confirmationDialog(pendingStartPrompt == .switchOld ? "安全切换旧控制器并启动 App？" : "启动真实设备模式？",
+            isPresented: Binding(get: { pendingStartPrompt != nil }, set: { if !$0 { pendingStartPrompt = nil } })) {
+            if pendingStartPrompt == .switchOld {
+                Button("确认设备已停止，切换到 App") { model.switchFromLegacyAndStart() }
+            } else {
+                Button("确认启动引擎（不自动连接设备）") { model.manageService("start") }
+            }
+        } message: {
+            Text(pendingStartPrompt == .switchOld
+                ? "先检查旧控制器 inactive 且 A/B 为 0，再停止旧后台并启动 App。必须自行确认实体设备可立即停止。"
+                : "仅启动本机控制服务；设备连接和授权输出还需另外确认。")
+        }
     }
 }
 
@@ -121,9 +151,8 @@ private struct Metric: View {
 private struct OverviewPage: View {
     @EnvironmentObject private var model: ConsoleModel
     @State private var sessionMode = "collaboration"
-    @State private var confirmArm = false
-    @State private var confirmConnect = false
-    @State private var confirmDisconnect = false
+    private enum SessionPrompt { case arm, connect, disconnect }
+    @State private var sessionPrompt: SessionPrompt?
 
     var body: some View {
         Text("概览").font(.largeTitle.bold())
@@ -146,15 +175,15 @@ private struct OverviewPage: View {
                     Button("创建未授权会话") {
                         model.command("session.create", payload: ["mode": sessionMode])
                     }.disabled(state?.isActive == true || !model.connected)
-                    Button("授权并开始") { confirmArm = true }
+                    Button("授权并开始") { sessionPrompt = .arm }
                         .buttonStyle(.borderedProminent)
                         .disabled(state?.sessionState != "draft")
                 }
                 Divider()
                 HStack {
-                    Button(model.deviceConnecting ? "设备连接中…" : "连接设备并归零") { confirmConnect = true }
+                    Button(model.deviceConnecting ? "设备连接中…" : "连接设备并归零") { sessionPrompt = .connect }
                         .disabled(!model.connected || state?.isActive == true || model.deviceConnecting || model.isWorking)
-                    Button("停止并断开设备") { confirmDisconnect = true }
+                    Button("停止并断开设备") { sessionPrompt = .disconnect }
                         .disabled(!model.connected)
                     Spacer()
                     if let url = model.obsURL {
@@ -177,15 +206,19 @@ private struct OverviewPage: View {
             }
             .padding(10)
         }
-        .confirmationDialog("授权并启动设备会话？", isPresented: $confirmArm) {
-            Button("我确认设备已准备，开始会话") { model.command("session.arm", confirmation: "arm") }
-        } message: { Text("此操作可能将设备强度设置为 1，并开始播放波形。") }
-        .confirmationDialog("连接 DG-LAB 设备？", isPresented: $confirmConnect) {
-            Button("连接并初始化归零") { model.command("device.connect", confirmation: "connect") }
-        } message: { Text("将进行蓝牙连接并尝试发送归零指令。") }
-        .confirmationDialog("停止并断开设备？", isPresented: $confirmDisconnect) {
-            Button("停止会话并断开") { model.command("session.disconnect") }
-        } message: { Text("将尝试停止输出、归零并断开蓝牙。") }
+        .confirmationDialog(sessionPrompt == .arm ? "授权并启动设备会话？" : sessionPrompt == .connect ? "连接 DG-LAB 设备？" : "停止并断开设备？",
+            isPresented: Binding(get: { sessionPrompt != nil }, set: { if !$0 { sessionPrompt = nil } })) {
+            if sessionPrompt == .arm {
+                Button("我确认设备已准备，开始会话") { model.command("session.arm", confirmation: "arm") }
+            } else if sessionPrompt == .connect {
+                Button("连接并初始化归零") { model.command("device.connect", confirmation: "connect") }
+            } else {
+                Button("停止会话并断开") { model.command("session.disconnect") }
+            }
+        } message: {
+            Text(sessionPrompt == .arm ? "会话授权可能初始化设备输出。请先确认设备线路及独立急停手段。"
+                 : sessionPrompt == .connect ? "进行蓝牙扫描与连接，成功后尝试归零。" : "将停止输出、归零并断开蓝牙。")
+        }
     }
 }
 

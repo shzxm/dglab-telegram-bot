@@ -73,3 +73,12 @@ flowchart LR
 - 退出 App 时会先检查是否存在非零强度或状态不确定的会话，避免一边真实输出一边无提示杀死控制进程；意外退出有子进程父 PID 看门狗尝试安全停机，但物理断连时无法保证归零指令抵达。
 
 更详细的独立构建方案见 [macOS App README](../macos/DGLabConsole/README.md)。
+
+
+## 原版 CLI 与独立 Mac App 的单例控制权（v1.3.0）
+
+- 旧版 `com.dglab.telegram-bot` LaunchAgent 与独立 macOS App 内置 Node 引擎**不能并发**：两者争抢 TCP 8787/8788/8789、Telegram getUpdates 与同一台 BLE 设备。
+- SwiftUI 全局显示启动按钮；如果发现旧服务，必须用户二次确认后运行只读公开 OBS 会话状态检查（inactive、A/B=0），然后使用同一 macOS GUI 用户的 `launchctl bootout` 卸载原 LaunchAgent；确认端口释放后才启动 App 自己的 Node。旧 plist 文件保留，供用户在 App 内置引擎停止时显式恢复。
+- 无法读取旧服务状态、状态非零或卸载失败均拒绝切换。BLE 实体失联时软件状态不能证明硬件归零；必须由用户物理确认与单独急停。
+- 本地 REST API `/v1/status` 还会报告 Telegram Bot 真实初始化状态和录音辅助进程故障；不将 REST `/health` 可访问等同于 Telegram 已成功上线。
+- `iOS` 端可选择 iPhone BLE 主机或 Mac Bot 远程控制，桥接需要与**当前**控制器的凭证和 Mac 局域网绑定地址一致。

@@ -16,6 +16,8 @@ const config = loadConfig(process.env);
 const { token, ownerUserId, allowedChatId, strengthLimit, sessionDurationMs, voteWindowMs, actionWindowMs, actionsPerWindow, obsHost, obsPort } = config;
 const bot = new Telegraf(token);
 const iosToken = (process.env.IOS_BRIDGE_TOKEN ?? "").trim();
+let telegramState: "disabled" | "starting" | "online" | "error" = process.env.DG_DESKTOP_OFFLINE === "1" ? "disabled" : "starting";
+let telegramError = "";
 const iosBridge: IOSBridgeServer | null = iosToken ? new IOSBridgeServer(iosToken, {
   snapshot: iosSnapshot,
   command: iosOwnerCommand,
@@ -38,6 +40,9 @@ const localAPI = iosToken ? new LocalControlAPI(iosToken, {
     sessionState: session?.snapshot().state ?? "none",
     device: await device.getStatus(),
     deviceMode: config.deviceMode,
+    telegramState,
+    telegramError,
+    audioCaptureError: audioReactive.captureError,
     audioVolume: audioReactive.isEnabled("volume"),
     audioBeat: audioReactive.isEnabled("beat"),
     audioTarget, audioMinHz: audioRange.minHz, audioMaxHz: audioRange.maxHz,
@@ -855,8 +860,18 @@ if (iosBridge) {
 }
 
 if (process.env.DG_DESKTOP_OFFLINE !== "1") {
+  // The authenticated local API may be up before Telegram's getMe/polling
+  // succeeds. Expose this distinction so the GUI does not claim TG is ready.
+  const reportPending = setTimeout(() => {
+    if (telegramState === "starting") {
+      console.warn("Telegram still initializing after 15 seconds; check Bot API connectivity and token");
+    }
+  }, 15_000);
+  reportPending.unref?.();
   bot.launch({ dropPendingUpdates: true }).then(async () => {
-  await bot.telegram.setMyCommands([
+  telegramState = "online";
+  clearTimeout(reportPending);
+  try { await bot.telegram.setMyCommands([
     { command: "start", description: "打开控制面板或使用邀请码加入" },
     { command: "help", description: "查看中文操作说明" },
     { command: "join", description: "使用多人邀请码加入会话" },
@@ -872,10 +887,18 @@ if (process.env.DG_DESKTOP_OFFLINE !== "1") {
     { command: "stop", description: "管理员：停止会话" },
     { command: "disarm", description: "管理员：撤销并归零" },
     { command: "disconnect", description: "管理员：停止并断开设备" },
-  ]);
+  ]); } catch (error) {
+    telegramError = error instanceof Error ? error.message : String(error);
+    console.error("Telegram setMyCommands warning:", telegramError);
+  }
   console.log(`DG-LAB Telegram bot started in ${config.deviceMode === "ble" ? "BLE" : config.deviceMode === "ios" ? "iOS relay" : "MOCK"} mode`);
   console.log(`OBS overlay: http://${obsHost}:${obsPort}/obs`);
-  }).catch((error) => console.error("Telegram launch error", error));
+  }).catch((error: unknown) => {
+    clearTimeout(reportPending);
+    telegramState = "error";
+    telegramError = error instanceof Error ? error.message : String(error);
+    console.error("Telegram launch error:", telegramError);
+  });
 } else {
   console.log("DG-LAB desktop local-only mode: Telegram polling disabled");
 }

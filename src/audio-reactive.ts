@@ -20,6 +20,17 @@ export const AUDIO_FREQUENCY_RANGES: readonly FrequencyRange[] = [
   { minHz: 1, maxHz: 100 },
 ];
 
+/** Actionable macOS capture diagnostics; never guesses that every failure is TCC. */
+export function explainAudioCaptureFailure(output: string): string {
+  if (/(-3815|找不到任何要捕捉的显示器或窗口|no display available)/i.test(output)) {
+    return "系统音频捕获无法找到可用显示器或窗口。请检查「屏幕与系统音频录制」授权、实际显示器连接；无头 Mac 可能需要可用显示输出。";
+  }
+  if (/(permission|not.authorized|未授权|权限|denied)/i.test(output)) {
+    return "没有获得系统音频录制权限。请在 macOS 隐私与安全性中授权，并重启 App 后重新测试。";
+  }
+  return "系统音频捕获进程已退出。请导出诊断日志，检查 ScreenCaptureKit 返回的错误。";
+}
+
 export function validateFrequencyRange(range: FrequencyRange): FrequencyRange {
   if (!Number.isFinite(range.minHz) || !Number.isFinite(range.maxHz) ||
       range.minHz < 1 || range.maxHz > 100 || range.minHz > range.maxHz) {
@@ -74,6 +85,8 @@ export class SystemAudioReactiveController {
   private generation = 0;
   private lastRenderAt = 0;
   private readonly helperPath: string;
+  private recentCaptureError = "";
+  get captureError(): string { return this.recentCaptureError; }
 
   constructor(private readonly device: Device, helperPath?: string) {
     this.helperPath = helperPath ?? process.env.DGLAB_AUDIO_HELPER_PATH ?? join(homedir(), ".local", "bin", "dglab-system-audio-meter");
@@ -125,6 +138,7 @@ export class SystemAudioReactiveController {
     this.onFailure = onFailure;
     this.lastMetricAt = Date.now();
     this.lastRenderAt = 0;
+    this.recentCaptureError = "";
     const generation = this.generation;
     const child = spawn(this.helperPath, [], { stdio: ["ignore", "pipe", "pipe"] });
     this.process = child;
@@ -143,9 +157,17 @@ export class SystemAudioReactiveController {
         end = this.reader.indexOf("\n");
       }
     });
-    child.stderr.on("data", (chunk: Buffer) => { console.error("System audio:", chunk.toString().slice(0, 240)); });
-    child.on("error", () => { if (this.generation === generation) this.fail("无法启动系统音频捕获"); });
-    child.on("exit", () => { if (this.generation === generation) this.fail("系统音频捕获已退出，请检查权限"); });
+    child.stderr.on("data", (chunk: Buffer) => {
+      const message = chunk.toString().slice(0, 512);
+      this.recentCaptureError = (this.recentCaptureError + message).slice(-1200);
+      console.error("System audio:", message);
+    });
+    child.on("error", (error) => {
+      if (this.generation === generation) this.fail(`无法启动系统音频捕获：${error.message}`);
+    });
+    child.on("exit", () => {
+      if (this.generation === generation) this.fail(explainAudioCaptureFailure(this.recentCaptureError));
+    });
     this.guardTimer = setInterval(() => {
       if (this.generation !== generation) return;
       if (session.snapshot().state !== "active") { this.stop(); return; }

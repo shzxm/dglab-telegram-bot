@@ -244,3 +244,9 @@ launchd/                    macOS 服务模板
 ### macOS Console v1.2.0：本地密钥与诊断日志
 
 API 桥接密钥、Telegram 凭证改为 **App 专属 Application Support 本地文件**（`0700/0600`），不再访问 macOS Keychain，因此不触发钥匙串授权。原有钥匙串密钥不会自动迁移，首次需要重新同步 iOS 桥接密钥、Telegram Token。新增持久化、脱敏、限大小的 App/Node 日志以及「本地 API → 导出诊断日志」按钮，可选择文件路径导出 `.txt`，方便排错。详见 [App README](macos/DGLabConsole/README.md)。
+
+### macOS Console v1.3.0：启动与旧版冲突处理
+
+新版 macOS App 的所有页面顶部都能看到「启动控制引擎」。如果旧版 `com.dglab.telegram-bot` LaunchAgent 占用 OBS/API/iOS Bridge 端口，则显示「安全切换旧后台」，用户确认后先核查旧会话 inactive 和 A/B=0，再卸载旧 LaunchAgent、等待端口释放后启动新 App 内嵌引擎。旧服务也能在新引擎停止后恢复。**软件确认零输出并不代表在蓝牙失联时实体设备保证停止，实际使用仍需可立即触及的物理停止方式。**
+
+新版内置引擎状态界面区分 API 已连接、Telegram 正在初始化/在线/故障、设备 BLE 连接，并提供具体错误；系统音频将区分找不到屏幕/窗口的 ScreenCaptureKit -3815 故障与授权拒绝。局域网桥接 IP 由用户手动确认后填入，只推荐私有 IPv4，不会自动向公网开放端口。详情见 [macOS App README](macos/DGLabConsole/README.md)。

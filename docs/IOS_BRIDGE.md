@@ -60,3 +60,8 @@ macOS 本机另有 [DG-LAB Console](../macos/DGLabConsole/README.md)，使用 **
 ## macOS App 1.2.0 本地凭证保存
 
 对于新 macOS 独立 App，`IOS_BRIDGE_TOKEN` 由 App 自动生成并保存在用户的 `~/Library/Application Support/DG-LAB Console/credentials.json`，不再读取 macOS Keychain。老版本 App、直接运行的 Node 命令行控制器可以继续使用既有启动方式。**iOS 客户端的 Keychain 凭证存储没有改变**；首次从旧 macOS App 升级到 1.2.0 时，需要手动更新客户端的桥接密钥，或者在新 Mac App 中重新输入旧密钥。不能在内置控制引擎运行期间修改 API 密钥。
+
+
+## macOS 新旧控制器启动冲突的处理
+
+iOS 通过 WebSocket `ws://<当前 Mac 私网 IP>:8788` 连接当前唯一的控制器。旧 LaunchAgent 与新版 macOS App 共享 8788 端口，**只能同时运行其中一套**。新 App 可在用户确认安全后切换旧后台。macOS App 本地文件凭证与旧 Node 的 Keychain 桥接密钥不会自动同步，iOS 需明确使用当前进程实际持有的那份密钥。`127.0.0.1` 是手机本机回环地址，不能用于连接其他电脑；macOS App 提供「使用当前内网 IP」「复制 iOS 桥接地址」按钮。

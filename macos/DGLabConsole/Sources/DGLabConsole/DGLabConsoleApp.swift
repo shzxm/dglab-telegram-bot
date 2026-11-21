@@ -30,6 +30,7 @@ struct DGLabConsoleApp: App {
                         try? await Task.sleep(nanoseconds: 1_000_000_000)
                         if Task.isCancelled { break }
                         await model.refresh()
+                        if !model.embeddedEngine.running { await model.refreshServiceStatus() }
                     }
                 }
         }

@@ -22,6 +22,9 @@ struct ConsoleSnapshot: Decodable {
     var waveformB: String? = nil
     var device: ConsoleDevice? = nil
     var deviceMode: String? = nil
+    var telegramState: String? = nil
+    var telegramError: String? = nil
+    var audioCaptureError: String? = nil
     var participants: Int? = nil
     var inviteCode: String? = nil
     var groupId: Int64? = nil
@@ -81,6 +84,7 @@ final class ConsoleModel: ObservableObject {
         didSet { UserDefaults.standard.set(apiPort, forKey: "DGLabLocalAPIPort") }
     }
     @Published var serviceLabel = "正在检查服务…"
+    @Published private(set) var legacyRunning = false
 
     private var secret = ""
     private let session: URLSession
@@ -334,7 +338,42 @@ final class ConsoleModel: ObservableObject {
         }
     }
     func refreshServiceStatus() async {
-        serviceLabel = embeddedEngine.running ? "内置引擎：运行中" : "内置引擎：已停止"
+        let running = LegacyServiceController.isLoaded()
+        legacyRunning = running
+        if embeddedEngine.running { serviceLabel = "App 内置引擎：运行中" }
+        else if running { serviceLabel = "旧版后台正在运行；需先安全切换，才能启动 App 内置引擎" }
+        else { serviceLabel = "App 内置引擎：已停止（可启动）" }
+    }
+
+    func switchFromLegacyAndStart() {
+        Task {
+            guard !embeddedEngine.running && !isWorking else { return }
+            isWorking = true
+            defer { isWorking = false }
+            do {
+                serviceLabel = "正在检查旧控制器零输出，准备切换…"
+                try await LegacyServiceController.stopIdleLegacyAgent()
+                await refreshServiceStatus()
+                note("已停止旧版后台，正在启动 App 内置引擎")
+                await embeddedEngine.start(model: self)
+            } catch {
+                errorMessage = "安全切换失败：\(error.localizedDescription)"
+                await refreshServiceStatus()
+            }
+        }
+    }
+
+    func restoreLegacyBackend() {
+        Task {
+            guard !embeddedEngine.running && !isWorking else { return }
+            isWorking = true
+            defer { isWorking = false }
+            do {
+                try await LegacyServiceController.restoreLegacyAgent()
+                note("已恢复旧版无图形控制器")
+            } catch { errorMessage = "恢复旧版后台失败：\(error.localizedDescription)" }
+            await refreshServiceStatus()
+        }
     }
     func runSelfTest() {
         Task {
@@ -357,7 +396,11 @@ final class ConsoleModel: ObservableObject {
             isWorking = true
             defer { isWorking = false }
             switch action {
-            case "start": await embeddedEngine.start(model: self)
+            case "start":
+                await refreshServiceStatus()
+                if legacyRunning {
+                    errorMessage = "旧版控制器正在运行并占用端口。请点击「安全切换旧后台」并确认设备已停止。"
+                } else { await embeddedEngine.start(model: self) }
             case "restart":
                 if await embeddedEngine.stop(model: self) {
                     await embeddedEngine.start(model: self)
@@ -365,6 +408,7 @@ final class ConsoleModel: ObservableObject {
             case "stop": _ = await embeddedEngine.stop(model: self)
             default: break
             }
+            await refreshServiceStatus()
         }
     }
     var obsURL: URL? { URL(string: snapshot?.obsURL ?? "http://127.0.0.1:8787/obs") }

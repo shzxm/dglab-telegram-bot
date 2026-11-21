@@ -3,8 +3,8 @@ import AppKit
 
 struct EnginePage: View {
     @EnvironmentObject private var model: ConsoleModel
-    @State private var confirmRealEngine = false
-    @State private var confirmStop = false
+    private enum EnginePrompt { case realStart, stop, switchOld, restoreOld }
+    @State private var prompt: EnginePrompt?
 
     var body: some View {
         Text("内置控制引擎").font(.largeTitle.bold())
@@ -20,18 +20,25 @@ struct EnginePage: View {
                     Text("内置 Node.js 24").font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 HStack {
-                    Button("启动 App 内置引擎") {
-                        if model.selectedDeviceMode == "mock" { model.manageService("start") }
-                        else { confirmRealEngine = true }
+                    Button(model.legacyRunning ? "安全切换旧后台并启动" : "启动 App 内置引擎") {
+                        if model.legacyRunning { prompt = .switchOld }
+                        else if model.selectedDeviceMode == "mock" { model.manageService("start") }
+                        else { prompt = .realStart }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.embeddedEngine.running || model.isWorking)
-                    Button("停止并断开所有控制") { confirmStop = true }
+                    Button("停止并断开所有控制") { prompt = .stop }
                         .disabled(!model.embeddedEngine.running || model.isWorking)
                     Button("安全 Mock 自检") { model.runSelfTest() }
                         .disabled(model.embeddedEngine.running || model.isWorking)
                     Button("刷新") { Task { await model.refresh(); await model.refreshServiceStatus() } }
                 }
+                if model.legacyRunning && !model.embeddedEngine.running {
+                    Label("检测到旧版无图形控制器占用 API、OBS 和桥接端口。不能同时启动两套控制核心。", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Button("恢复旧版无图形后台") { prompt = .restoreOld }
+                    .disabled(model.embeddedEngine.running || model.legacyRunning || model.isWorking)
                 Text("启动默认不会连接蓝牙或启动强度；真实设备连接和会话授权仍需要独立确认。只有确认零输出后才能停止引擎。")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(10)
@@ -76,6 +83,18 @@ struct EnginePage: View {
                     TextField("127.0.0.1（仅本机）或可信 LAN IP", text: $model.bridgeHost)
                         .textFieldStyle(.roundedBorder)
                         .disabled(model.embeddedEngine.running)
+                    Button("使用当前内网 IP") {
+                        if let ip = LocalNetworkAddress.suggestedIPv4() { model.bridgeHost = ip }
+                        else { model.errorMessage = "无法检测到活动的可信 IPv4 局域网地址，请手动填写" }
+                    }.disabled(model.embeddedEngine.running)
+                }
+                HStack {
+                    Button("复制 iOS 桥接地址") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("ws://\(model.bridgeHost):8788", forType: .string)
+                    }
+                    Text("只复制地址，不复制密钥")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Text("本机 REST API：127.0.0.1:\(model.apiPort)。iPhone WebSocket：\(model.bridgeHost):8788。仅在可信局域网可把桥接地址改为 Mac 的内网 IP，不得直接向公网暴露。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -83,12 +102,31 @@ struct EnginePage: View {
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(10)
         }
-        .confirmationDialog("启动真实设备模式的完整控制引擎？", isPresented: $confirmRealEngine) {
-            Button("确认启动（不会自动连接或授权输出）") { model.manageService("start") }
-        } message: { Text("启动后 Telegram Bot 可连接网络；真正发出设备指令前仍需现场确认。") }
-        .confirmationDialog("停止整个 App 内置控制引擎？", isPresented: $confirmStop) {
-            Button("确定停止") { model.manageService("stop") }
-        } message: { Text("将依次停止声音响应和自动提升、归零会话、断开蓝牙、停止 API/Telegram 并等待内置进程结束。若无法确认安全关闭，会保留引擎并显示错误。") }
+        .onAppear { Task { await model.refreshServiceStatus() } }
+        .confirmationDialog(
+            prompt == .switchOld ? "关闭旧后台并启动 App？" :
+            prompt == .restoreOld ? "恢复旧版控制器？" :
+            prompt == .stop ? "停止并断开所有控制？" : "启动真实设备模式？",
+            isPresented: Binding(get: { prompt != nil }, set: { if !$0 { prompt = nil } })
+        ) {
+            switch prompt {
+            case .switchOld:
+                Button("确认设备已停止，安全切换") { model.switchFromLegacyAndStart() }
+            case .restoreOld:
+                Button("确认恢复旧版后台") { model.restoreLegacyBackend() }
+            case .stop:
+                Button("确认停止所有控制") { model.manageService("stop") }
+            case .realStart:
+                Button("确认启动（不自动连接或授权输出）") { model.manageService("start") }
+            case nil:
+                EmptyView()
+            }
+        } message: {
+            Text(prompt == .switchOld ? "先检查旧服务 inactive、A/B=0，再关闭旧后台释放端口并启动此 App。请自行确认实体设备停止。" :
+                 prompt == .restoreOld ? "只有新引擎已经退出且端口空闲时才能恢复旧服务。" :
+                 prompt == .stop ? "停止声音、自动提升和会话，确认归零并断开设备后才退出子进程。" :
+                 "只启动控制服务，不自动连接或授权实体输出。")
+        }
     }
 }
 
