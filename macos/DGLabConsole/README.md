@@ -90,3 +90,5 @@ iOS App [dglab-ios](https://github.com/shzxm/dglab-ios) 可选择完全独立蓝
 - 用户明确确认后，先读取旧版 OBS 状态，只有旧会话 inactive 且 A/B=0 时才允许 `launchctl bootout` 旧 LaunchAgent；确认端口释放后才启动内置引擎。切换前必须自行确认实体设备已停止，零输出软件状态不代表真实断电。也可在内置引擎停止后恢复旧 LaunchAgent，两个程序不同时控制 BLE 和 Telegram。
 - 内置引擎页面可手动点击「使用当前内网 IP」，只建议局域网私有 IPv4（优先 en0）；桥接地址可直接复制到 iPhone App。新密钥仍必须与 iPhone 手动同步，不会自动从旧钥匙串导入。
 - 主页面区分 API、蓝牙、Telegram 三种就绪状态，并给出 Telegram 启动失败原因；系统音频故障区分无显示器/ScreenCaptureKit -3815 和录屏权限错误。
+
+- `iOS Bridge` 的系统音频监测也优先使用 App 内置 `DGLAB_AUDIO_HELPER_PATH`，不再强制依赖旧版 `~/.local/bin/dglab-system-audio-meter`。

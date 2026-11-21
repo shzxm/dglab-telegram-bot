@@ -170,7 +170,9 @@ export class IOSBridgeServer {
   }
   private startAudioMonitor(): void {
     if (this.audio) return;
-    const exe = join(homedir(), ".local", "bin", "dglab-system-audio-meter");
+    // Standalone macOS App bundles its own helper; the old ~/.local/bin path
+    // exists only for the separately deployed LaunchAgent controller.
+    const exe = process.env.DGLAB_AUDIO_HELPER_PATH ?? join(homedir(), ".local", "bin", "dglab-system-audio-meter");
     const child = spawn(exe, [], { stdio: ["ignore", "pipe", "pipe"] });
     this.audio = child; this.audioBuffer = "";
     child.stdout.setEncoding("utf8");
